@@ -1,0 +1,26 @@
+{
+  "name": "cueai",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @cueai/web",
+    "dev:web": "npm run dev -w @cueai/web",
+    "dev:desktop": "npm run dev -w @cueai/desktop",
+    "build": "npm run build -w @cueai/web",
+    "build:web": "npm run build -w @cueai/web",
+    "build:desktop": "npm run build -w @cueai/desktop",
+    "dist:desktop": "npm run dist -w @cueai/desktop",
+    "start": "npm run start -w @cueai/web",
+    "lint": "npm run lint -w @cueai/web"
+  },
+  "dependencies": {
+    "electron-builder": "^26.15.3"
+  },
+  "allowScripts": {
+    "electron@37.10.3": true,
+    "esbuild@0.28.1": true
+  }
+}

@@ -1,0 +1,26 @@
+import { NextResponse } from "next/server";
+
+function isRealSecret(value?: string) {
+  if (!value) return false;
+  const v = value.trim().toLowerCase();
+  if (!v) return false;
+  const placeholders = [
+    "your-client-id",
+    "your-client-secret",
+    "changeme",
+    "xxx",
+    "todo",
+  ];
+  return !placeholders.includes(v);
+}
+
+export async function GET() {
+  return NextResponse.json({
+    google:
+      isRealSecret(process.env.AUTH_GOOGLE_ID) &&
+      isRealSecret(process.env.AUTH_GOOGLE_SECRET),
+    github:
+      isRealSecret(process.env.AUTH_GITHUB_ID) &&
+      isRealSecret(process.env.AUTH_GITHUB_SECRET),
+  });
+}
