@@ -17,7 +17,7 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     frame: false,
     titleBarStyle: "hidden",
-    backgroundColor: "#0B0F10",
+    backgroundColor: "#090909",
     roundedCorners: true,
     hasShadow: true,
     thickFrame: true,
