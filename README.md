@@ -34,6 +34,17 @@ uvicorn app.main:app --reload --port 8000
 
 See `backend/README.md` for backend phases and architecture.
 
+### Client preview (ngrok)
+
+Share the Next.js UI over HTTPS without changing the local port:
+
+```bash
+npm run dev:web          # http://localhost:3000
+npm run ngrok            # or: npm run client-preview
+```
+
+Set `NGROK_AUTHTOKEN` in `.env.local` (gitignored). Details: `docs/ngrok-client-preview.md`.
+
 Docker (API + Postgres/pgvector + Redis + MinIO + Celery):
 
 ```bash
