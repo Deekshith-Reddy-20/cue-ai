@@ -13,6 +13,9 @@ import {
   ArrowUpRight,
   EyeOff,
   Shield,
+  Mic,
+  Volume2,
+  Camera,
 } from "lucide-react";
 import {
   DESKTOP_PROTOCOL_COMPANION,
@@ -23,6 +26,21 @@ import {
 } from "@/lib/desktop";
 
 const features = [
+  {
+    icon: Mic,
+    title: "Mic audio listening",
+    desc: "Toggle microphone capture in the companion header so CueAI can listen to your side of the call.",
+  },
+  {
+    icon: Volume2,
+    title: "System audio listening",
+    desc: "Capture meeting/app playback via Windows loopback so CueAI can hear what others say on screen.",
+  },
+  {
+    icon: Camera,
+    title: "Screenshot capture",
+    desc: "Grab a clean full-screen PNG from the companion. The overlay hides briefly so it is not in the shot.",
+  },
   {
     icon: Layers,
     title: "System-wide always-on-top",

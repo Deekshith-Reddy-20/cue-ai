@@ -187,7 +187,6 @@ function enterPresentationForShare() {
     setStoreValue("companionModeBeforeShare", current);
   }
   controller.setMode("presenter");
-  controller.setOpacity(1);
   controller.dockPresenter();
   controller.show();
 }

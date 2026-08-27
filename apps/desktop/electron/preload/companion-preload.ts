@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IpcChannels, type CompanionMode } from "../ipc/channels";
-import type { CaptureStatus, CompanionAPI, MeetingSession } from "../../src/types/companion";
+import type {
+  CaptureStatus,
+  CompanionAPI,
+  ListenSources,
+  MeetingSession,
+} from "../../src/types/companion";
 
 const api: CompanionAPI = {
   minimize: () => ipcRenderer.invoke(IpcChannels.COMPANION_MINIMIZE),
@@ -16,6 +21,14 @@ const api: CompanionAPI = {
     ipcRenderer.invoke(IpcChannels.COMPANION_GET_CAPTURE_STATUS) as Promise<CaptureStatus>,
   setExcludeCapture: (enabled) =>
     ipcRenderer.invoke(IpcChannels.COMPANION_SET_EXCLUDE_CAPTURE, enabled) as Promise<CaptureStatus>,
+  getListenSources: () =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_GET_LISTEN_SOURCES) as Promise<ListenSources>,
+  setListenSources: (sources) =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_SET_LISTEN_SOURCES, sources) as Promise<ListenSources>,
+  getDesktopAudioSourceId: () =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_GET_DESKTOP_AUDIO_SOURCE) as Promise<string | null>,
+  captureScreenshot: (opts) =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_CAPTURE_SCREENSHOT, opts),
   getSession: () =>
     ipcRenderer.invoke(IpcChannels.MEETING_GET_SESSION) as Promise<MeetingSession>,
   onMode: (cb) => {
@@ -32,6 +45,11 @@ const api: CompanionAPI = {
     const listener = (_: Electron.IpcRendererEvent, status: CaptureStatus) => cb(status);
     ipcRenderer.on("companion:capture-status", listener);
     return () => ipcRenderer.removeListener("companion:capture-status", listener);
+  },
+  onListenSources: (cb) => {
+    const listener = (_: Electron.IpcRendererEvent, sources: ListenSources) => cb(sources);
+    ipcRenderer.on("companion:listen-sources", listener);
+    return () => ipcRenderer.removeListener("companion:listen-sources", listener);
   },
 };
 

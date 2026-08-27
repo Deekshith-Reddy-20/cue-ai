@@ -16,6 +16,11 @@ type CaptureStatus = {
   message: string;
 };
 
+type ListenSources = {
+  mic: boolean;
+  systemAudio: boolean;
+};
+
 /** Main window API — CueAI shell (Next.js). */
 const cueDesktop = {
   isDesktop: true as const,
@@ -60,6 +65,13 @@ const cueDesktop = {
     ipcRenderer.invoke(IpcChannels.MEETING_GET_SESSION) as Promise<MeetingSession>,
   getCaptureStatus: () =>
     ipcRenderer.invoke(IpcChannels.COMPANION_GET_CAPTURE_STATUS) as Promise<CaptureStatus>,
+  captureScreenshot: (opts?: { save?: boolean }) =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_CAPTURE_SCREENSHOT, opts) as Promise<{
+      ok: boolean;
+      dataUrl?: string;
+      savedPath?: string | null;
+      error?: string;
+    }>,
 };
 
 /** Companion overlay API. */
@@ -77,6 +89,19 @@ const cueai = {
     ipcRenderer.invoke(IpcChannels.COMPANION_GET_CAPTURE_STATUS) as Promise<CaptureStatus>,
   setExcludeCapture: (enabled: boolean) =>
     ipcRenderer.invoke(IpcChannels.COMPANION_SET_EXCLUDE_CAPTURE, enabled) as Promise<CaptureStatus>,
+  getListenSources: () =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_GET_LISTEN_SOURCES) as Promise<ListenSources>,
+  setListenSources: (sources: Partial<ListenSources>) =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_SET_LISTEN_SOURCES, sources) as Promise<ListenSources>,
+  getDesktopAudioSourceId: () =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_GET_DESKTOP_AUDIO_SOURCE) as Promise<string | null>,
+  captureScreenshot: (opts?: { save?: boolean }) =>
+    ipcRenderer.invoke(IpcChannels.COMPANION_CAPTURE_SCREENSHOT, opts) as Promise<{
+      ok: boolean;
+      dataUrl?: string;
+      savedPath?: string | null;
+      error?: string;
+    }>,
   getSession: () =>
     ipcRenderer.invoke(IpcChannels.MEETING_GET_SESSION) as Promise<MeetingSession>,
   onMode: (cb: (mode: CompanionMode) => void) => {
@@ -93,6 +118,11 @@ const cueai = {
     const listener = (_: Electron.IpcRendererEvent, s: CaptureStatus) => cb(s);
     ipcRenderer.on("companion:capture-status", listener);
     return () => ipcRenderer.removeListener("companion:capture-status", listener);
+  },
+  onListenSources: (cb: (sources: ListenSources) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, s: ListenSources) => cb(s);
+    ipcRenderer.on("companion:listen-sources", listener);
+    return () => ipcRenderer.removeListener("companion:listen-sources", listener);
   },
 };
 

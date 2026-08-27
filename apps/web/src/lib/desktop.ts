@@ -26,6 +26,13 @@ export type CaptureStatus = {
   message: string;
 };
 
+export type ScreenshotResult = {
+  ok: boolean;
+  dataUrl?: string;
+  savedPath?: string | null;
+  error?: string;
+};
+
 export type CueDesktopAPI = {
   isDesktop: true;
   minimize: () => Promise<void>;
@@ -53,6 +60,7 @@ export type CueDesktopAPI = {
   setMeetingSession: (session: Partial<MeetingSession>) => Promise<MeetingSession>;
   getMeetingSession: () => Promise<MeetingSession>;
   getCaptureStatus: () => Promise<CaptureStatus>;
+  captureScreenshot?: (opts?: { save?: boolean }) => Promise<ScreenshotResult>;
 };
 
 declare global {

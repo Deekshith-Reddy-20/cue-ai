@@ -15,6 +15,18 @@ export type CaptureStatus = {
   message: string;
 };
 
+export type ListenSources = {
+  mic: boolean;
+  systemAudio: boolean;
+};
+
+export type ScreenshotResult = {
+  ok: boolean;
+  dataUrl?: string;
+  savedPath?: string | null;
+  error?: string;
+};
+
 export type CompanionAPI = {
   minimize: () => Promise<void>;
   hide: () => Promise<void>;
@@ -27,8 +39,13 @@ export type CompanionAPI = {
   activity: () => Promise<void>;
   getCaptureStatus: () => Promise<CaptureStatus>;
   setExcludeCapture: (enabled: boolean) => Promise<CaptureStatus>;
+  getListenSources: () => Promise<ListenSources>;
+  setListenSources: (sources: Partial<ListenSources>) => Promise<ListenSources>;
+  getDesktopAudioSourceId: () => Promise<string | null>;
+  captureScreenshot: (opts?: { save?: boolean }) => Promise<ScreenshotResult>;
   getSession: () => Promise<MeetingSession>;
   onMode: (cb: (mode: CompanionMode) => void) => () => void;
   onSession: (cb: (session: MeetingSession) => void) => () => void;
   onCaptureStatus: (cb: (status: CaptureStatus) => void) => () => void;
+  onListenSources: (cb: (sources: ListenSources) => void) => () => void;
 };

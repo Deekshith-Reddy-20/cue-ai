@@ -20,6 +20,8 @@ const defaults: CueStoreSchema = {
     showNotifications: true,
     globalShortcuts: true,
     excludeFromCapture: true,
+    listenMic: true,
+    listenSystemAudio: false,
     autoPresentOnMeeting: true,
     autoHide: false,
     autoHideMs: 90000,

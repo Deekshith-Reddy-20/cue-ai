@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   Bookmark,
+  Camera,
   Copy,
   ExternalLink,
   Eye,
@@ -8,6 +9,8 @@ import {
   GripVertical,
   Languages,
   ListTodo,
+  Mic,
+  MicOff,
   Minimize2,
   Pin,
   Presentation,
@@ -15,11 +18,20 @@ import {
   Search,
   Sparkles,
   Square,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { useCompanionStore } from "./store/companion-store";
 import { AIService, TranslationService } from "./services";
+import {
+  stopAllListen,
+  subscribeListenLevels,
+  syncListenSources,
+  type ListenActiveState,
+} from "./services/audio-listen";
+import type { ScreenshotResult } from "./types/companion";
 
 const transcript = [
   { who: "Sarah", text: "Can we ship before the board meeting?" },
@@ -37,14 +49,18 @@ export default function App() {
   const {
     mode,
     pinned,
+    opacity,
     panel,
     session,
     capture,
+    listen,
     setMode,
     setPinned,
+    setOpacity,
     setPanel,
     setSession,
     setCapture,
+    setListen,
   } = useCompanionStore();
 
   const [ask, setAsk] = useState("");
@@ -59,6 +75,17 @@ export default function App() {
   const [translated, setTranslated] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
   const [activeLang, setActiveLang] = useState<string | null>(null);
+  const [listenLive, setListenLive] = useState<ListenActiveState>({
+    mic: false,
+    systemAudio: false,
+    micLevel: 0,
+    systemLevel: 0,
+    error: null,
+  });
+  const [listenBusy, setListenBusy] = useState(false);
+  const [shotBusy, setShotBusy] = useState(false);
+  const [shotPreview, setShotPreview] = useState<string | null>(null);
+  const [shotMsg, setShotMsg] = useState<string | null>(null);
 
   useEffect(() => {
     void window.cueai?.setMode(mode);
@@ -68,23 +95,55 @@ export default function App() {
     void window.cueai?.pin(pinned);
   }, [pinned]);
 
-  // Keep window-level opacity fully clear (no dimming).
   useEffect(() => {
-    void window.cueai?.setOpacity(1);
-  }, []);
+    void window.cueai?.setOpacity(opacity);
+  }, [opacity]);
 
   useEffect(() => {
     void window.cueai?.getCaptureStatus().then((s) => s && setCapture(s));
     void window.cueai?.getSession().then((s) => s && setSession(s));
+    void window.cueai?.getListenSources().then((s) => s && setListen(s));
     const offMode = window.cueai?.onMode((m) => setMode(m));
     const offSession = window.cueai?.onSession((s) => s && setSession(s));
     const offCapture = window.cueai?.onCaptureStatus((s) => s && setCapture(s));
+    const offListen = window.cueai?.onListenSources((s) => s && setListen(s));
     return () => {
       offMode?.();
       offSession?.();
       offCapture?.();
+      offListen?.();
     };
-  }, [setCapture, setMode, setSession]);
+  }, [setCapture, setListen, setMode, setSession]);
+
+  useEffect(() => {
+    return subscribeListenLevels(setListenLive);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setListenBusy(true);
+    void syncListenSources({
+      mic: listen.mic,
+      systemAudio: listen.systemAudio,
+      getDesktopSourceId: async () =>
+        (await window.cueai?.getDesktopAudioSourceId()) ?? null,
+    })
+      .catch(() => {
+        /* error mirrored via subscribeListenLevels */
+      })
+      .finally(() => {
+        if (!cancelled) setListenBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listen.mic, listen.systemAudio]);
+
+  useEffect(() => {
+    return () => {
+      void stopAllListen();
+    };
+  }, []);
 
   function bumpActivity() {
     void window.cueai?.activity();
@@ -133,6 +192,7 @@ export default function App() {
     setEnding(true);
     bumpActivity();
     try {
+      await stopAllListen();
       await window.cueai?.endSession();
     } finally {
       setEnding(false);
@@ -147,7 +207,41 @@ export default function App() {
     if (status) setCapture(status);
   }
 
+  async function toggleListen(kind: "mic" | "systemAudio") {
+    bumpActivity();
+    const next = {
+      mic: kind === "mic" ? !listen.mic : listen.mic,
+      systemAudio: kind === "systemAudio" ? !listen.systemAudio : listen.systemAudio,
+    };
+    setListen(next);
+    const saved = await window.cueai?.setListenSources(next);
+    if (saved) setListen(saved);
+  }
+
+  async function captureScreenshot() {
+    bumpActivity();
+    if (shotBusy) return;
+    setShotBusy(true);
+    setShotMsg(null);
+    try {
+      const result = (await window.cueai?.captureScreenshot({
+        save: false,
+      })) as ScreenshotResult | undefined;
+      if (!result?.ok) {
+        setShotMsg(result?.error || "Screenshot failed.");
+        return;
+      }
+      if (result.dataUrl) setShotPreview(result.dataUrl);
+      setShotMsg("Shot captured");
+    } catch (err) {
+      setShotMsg(err instanceof Error ? err.message : "Screenshot failed.");
+    } finally {
+      setShotBusy(false);
+    }
+  }
+
   const presenting = mode === "presenter" || session.screenSharing;
+  const listeningAny = listen.mic || listen.systemAudio;
 
   return (
     <div
@@ -188,6 +282,67 @@ export default function App() {
           >
             {privacyOn ? <EyeOff className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
             Privacy {privacyOn ? "on" : "off"}
+          </button>
+          <button
+            type="button"
+            disabled={listenBusy}
+            title={
+              listen.mic
+                ? listenLive.mic
+                  ? `Mic on · ${Math.round(listenLive.micLevel * 100)}%`
+                  : "Mic on"
+                : "Mic off"
+            }
+            onClick={() => void toggleListen("mic")}
+            className={cn(
+              "no-drag inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[8px] font-semibold transition-colors disabled:opacity-60",
+              listen.mic
+                ? "border border-teal-500/40 bg-teal-500/20 text-teal-200 hover:bg-teal-500/30"
+                : "border border-white/20 bg-white/5 text-zinc-300 hover:bg-white/10"
+            )}
+          >
+            {listen.mic ? <Mic className="h-2 w-2" /> : <MicOff className="h-2 w-2" />}
+            Mic
+          </button>
+          <button
+            type="button"
+            disabled={listenBusy}
+            title={
+              listen.systemAudio
+                ? listenLive.systemAudio
+                  ? `System on · ${Math.round(listenLive.systemLevel * 100)}%`
+                  : "System on"
+                : "System off"
+            }
+            onClick={() => void toggleListen("systemAudio")}
+            className={cn(
+              "no-drag inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[8px] font-semibold transition-colors disabled:opacity-60",
+              listen.systemAudio
+                ? "border border-sky-500/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
+                : "border border-white/20 bg-white/5 text-zinc-300 hover:bg-white/10"
+            )}
+          >
+            {listen.systemAudio ? (
+              <Volume2 className="h-2 w-2" />
+            ) : (
+              <VolumeX className="h-2 w-2" />
+            )}
+            System
+          </button>
+          <button
+            type="button"
+            disabled={shotBusy}
+            title="Capture screenshot"
+            onClick={() => void captureScreenshot()}
+            className={cn(
+              "no-drag inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[8px] font-semibold transition-colors disabled:opacity-60",
+              shotBusy
+                ? "border border-violet-500/40 bg-violet-500/20 text-violet-100"
+                : "border border-white/20 bg-white/5 text-zinc-300 hover:bg-white/10"
+            )}
+          >
+            <Camera className="h-2 w-2" />
+            {shotBusy ? "…" : "Shot"}
           </button>
           <div className="no-drag ml-auto flex items-center">
             <IconBtn
@@ -232,7 +387,16 @@ export default function App() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-60" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-400" />
               </span>
-              Listening · Privacy {privacyOn ? "on" : "off"}
+              Listening ·{" "}
+              {listeningAny
+                ? [
+                    listen.mic ? "Mic" : null,
+                    listen.systemAudio ? "System" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" + ")
+                : "paused"}{" "}
+              · Privacy {privacyOn ? "on" : "off"}
             </div>
             <button
               className="no-drag rounded px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-white/10"
@@ -243,6 +407,35 @@ export default function App() {
           </div>
         ) : (
           <div className="no-drag flex min-h-0 flex-1 flex-col gap-1.5 p-2">
+            {listenLive.error && (
+              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-100">
+                {listenLive.error}
+              </p>
+            )}
+            {shotMsg && (
+              <p className="rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] text-violet-100">
+                {shotMsg}
+              </p>
+            )}
+            {shotPreview && mode === "full" && (
+              <div className="relative overflow-hidden rounded-lg border border-white/15">
+                <img
+                  src={shotPreview}
+                  alt="Latest screenshot"
+                  className="max-h-28 w-full object-cover object-top"
+                />
+                <button
+                  type="button"
+                  className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-zinc-100 hover:bg-black/80"
+                  onClick={() => {
+                    setShotPreview(null);
+                    setShotMsg(null);
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             {mode === "full" && (
               <div className="flex gap-0.5">
                 {(
@@ -491,6 +684,28 @@ export default function App() {
               >
                 Collapse · Esc hides
               </button>
+            )}
+
+            {mode !== "collapsed" && (
+              <div className="no-drag mt-auto flex items-center gap-2 border-t border-white/10 pt-1.5">
+                <span className="shrink-0 text-[9px] font-medium text-zinc-400">Opacity</span>
+                <input
+                  type="range"
+                  min={35}
+                  max={100}
+                  step={1}
+                  value={Math.round(opacity * 100)}
+                  onChange={(e) => {
+                    bumpActivity();
+                    setOpacity(Number(e.target.value) / 100);
+                  }}
+                  className="h-1 w-full cursor-pointer accent-teal-400"
+                  title={`${Math.round(opacity * 100)}%`}
+                />
+                <span className="w-7 shrink-0 text-right text-[9px] tabular-nums text-zinc-300">
+                  {Math.round(opacity * 100)}%
+                </span>
+              </div>
             )}
           </div>
         )}

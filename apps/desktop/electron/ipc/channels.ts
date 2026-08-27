@@ -19,6 +19,10 @@ export const IpcChannels = {
   COMPANION_ACTIVITY: "companion:activity",
   COMPANION_GET_CAPTURE_STATUS: "companion:get-capture-status",
   COMPANION_SET_EXCLUDE_CAPTURE: "companion:set-exclude-capture",
+  COMPANION_GET_LISTEN_SOURCES: "companion:get-listen-sources",
+  COMPANION_SET_LISTEN_SOURCES: "companion:set-listen-sources",
+  COMPANION_GET_DESKTOP_AUDIO_SOURCE: "companion:get-desktop-audio-source",
+  COMPANION_CAPTURE_SCREENSHOT: "companion:capture-screenshot",
   COMPANION_END_SESSION: "companion:end-session",
 
   // Meeting / screen-share session
@@ -74,6 +78,8 @@ export type CueStoreSchema = {
     showNotifications: boolean;
     globalShortcuts: boolean;
     excludeFromCapture: boolean;
+    listenMic: boolean;
+    listenSystemAudio: boolean;
     autoPresentOnMeeting: boolean;
     autoHide: boolean;
     autoHideMs: number;
@@ -81,4 +87,9 @@ export type CueStoreSchema = {
     autoCollapseMs: number;
     presenterOpacity: number;
   };
+};
+
+export type ListenSources = {
+  mic: boolean;
+  systemAudio: boolean;
 };

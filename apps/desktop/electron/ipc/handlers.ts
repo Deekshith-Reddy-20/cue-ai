@@ -24,6 +24,8 @@ import {
   getMeetingSession,
   setMeetingSession,
 } from "../services/screen-share";
+import { getDesktopAudioSourceId } from "../services/audio-listen";
+import { capturePrimaryScreenshot } from "../services/screenshot";
 import { getWebOrigin } from "../services/web-server";
 
 function getMainWindow() {
@@ -128,6 +130,56 @@ export function registerIpcHandlers() {
     }
     return status;
   });
+
+  ipcMain.handle(IpcChannels.COMPANION_GET_LISTEN_SOURCES, () => {
+    const settings = getStoreValue("desktopSettings");
+    return {
+      mic: settings.listenMic !== false,
+      systemAudio: Boolean(settings.listenSystemAudio),
+    };
+  });
+
+  ipcMain.handle(
+    IpcChannels.COMPANION_SET_LISTEN_SOURCES,
+    (_e, payload: { mic?: boolean; systemAudio?: boolean }) => {
+      const settings = getStoreValue("desktopSettings");
+      const next = {
+        ...settings,
+        listenMic:
+          typeof payload?.mic === "boolean" ? payload.mic : settings.listenMic !== false,
+        listenSystemAudio:
+          typeof payload?.systemAudio === "boolean"
+            ? payload.systemAudio
+            : Boolean(settings.listenSystemAudio),
+      };
+      setStoreValue("desktopSettings", next);
+      const sources = { mic: next.listenMic, systemAudio: next.listenSystemAudio };
+      const win = getCompanionWindow();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send("companion:listen-sources", sources);
+      }
+      const main = getMainWindow();
+      if (main && !main.isDestroyed()) {
+        main.webContents.send("companion:listen-sources", sources);
+      }
+      return sources;
+    }
+  );
+
+  ipcMain.handle(IpcChannels.COMPANION_GET_DESKTOP_AUDIO_SOURCE, () =>
+    getDesktopAudioSourceId()
+  );
+
+  ipcMain.handle(
+    IpcChannels.COMPANION_CAPTURE_SCREENSHOT,
+    async (event, payload?: { save?: boolean }) => {
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      return capturePrimaryScreenshot({
+        save: payload?.save !== false,
+        parent,
+      });
+    }
+  );
 
   ipcMain.handle(
     IpcChannels.MEETING_SET_SESSION,

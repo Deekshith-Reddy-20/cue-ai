@@ -12,6 +12,7 @@ import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "../services/
 import { initUpdater } from "../updater/updater";
 import { getStoreValue } from "../services/store";
 import { startLocalBridge, stopLocalBridge } from "../services/local-bridge";
+import { registerMediaPermissionHandler } from "../services/audio-listen";
 import {
   startEmbeddedWebServer,
   stopEmbeddedWebServer,
@@ -76,6 +77,7 @@ if (!gotLock) {
     }
 
     registerIpcHandlers();
+    registerMediaPermissionHandler();
     startLocalBridge();
     mainWindow = createMainWindow();
 

@@ -224,9 +224,11 @@ export async function showCompanionAnimated() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   applyCaptureExclusion(win);
 
-  // Always full window opacity — panel transparency is handled in CSS.
-  setStoreValue("companionOpacity", 1);
-  win.setOpacity(1);
+  // Restore user opacity preference (slider in companion UI).
+  const opacity = getStoreValue("companionOpacity");
+  const nextOpacity = Math.min(1, Math.max(0.35, Number(opacity) || 1));
+  setStoreValue("companionOpacity", nextOpacity);
+  win.setOpacity(nextOpacity);
 
   // Already visible: don't re-run fade animations (stops Private/Live flicker).
   if (win.isVisible()) {
@@ -249,7 +251,6 @@ export async function hideCompanionAnimated() {
   if (epoch !== visibilityEpoch) return;
   if (!companionWin.isDestroyed()) {
     companionWin.hide();
-    companionWin.setOpacity(1);
     companionWin.webContents.send("companion:visibility", false);
   }
 }
@@ -310,10 +311,10 @@ export function setCompanionPinned(pinned: boolean) {
   }
 }
 
-export function setCompanionOpacity(_opacity: number) {
-  // Overlay stays fully opaque at the window level; visual transparency is CSS-only.
-  setStoreValue("companionOpacity", 1);
+export function setCompanionOpacity(opacity: number) {
+  const next = Math.min(1, Math.max(0.35, Number(opacity) || 1));
+  setStoreValue("companionOpacity", next);
   if (companionWin && !companionWin.isDestroyed() && companionWin.isVisible()) {
-    companionWin.setOpacity(1);
+    companionWin.setOpacity(next);
   }
 }
