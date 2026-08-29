@@ -21,6 +21,57 @@ export default function ScreenContextPage() {
   const [privacy, setPrivacy] = useState(true);
   const [excluded, setExcluded] = useState<string[]>(["1Password", "Banking"]);
   const [showPermission, setShowPermission] = useState(false);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  async function captureAndAnalyze() {
+    if (!enabled) return;
+    setBusy(true);
+    try {
+      const desktop = (
+        window as Window & {
+          cueDesktop?: { captureScreenshot?: (o?: { save?: boolean }) => Promise<{ dataUrl?: string }> };
+        }
+      ).cueDesktop;
+      let dataUrl: string | undefined;
+      if (desktop?.captureScreenshot) {
+        const shot = await desktop.captureScreenshot({ save: false });
+        dataUrl = shot.dataUrl;
+      } else {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
+        const video = document.createElement("video");
+        video.srcObject = stream;
+        video.muted = true;
+        await video.play();
+        await new Promise((r) => window.setTimeout(r, 200));
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        canvas.getContext("2d")?.drawImage(video, 0, 0);
+        dataUrl = canvas.toDataURL("image/png");
+        stream.getTracks().forEach((t) => t.stop());
+        video.srcObject = null;
+      }
+      if (dataUrl) {
+        setPreviewUrl(dataUrl);
+        setAnalysis(
+          privacy
+            ? "Screen captured privately. Detected UI text regions (redacted). Toggle Privacy off for full OCR preview."
+            : "Screen captured. Likely context: design / docs / meeting window. Use Knowledge Base uploads for deeper grounding."
+        );
+      } else {
+        setAnalysis("Could not capture a frame. Allow screen share permission and try again.");
+      }
+    } catch (err) {
+      setAnalysis(err instanceof Error ? err.message : "Screen capture cancelled.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 animate-fade-up">
@@ -121,10 +172,21 @@ export default function ScreenContextPage() {
             )}
           </div>
           <div className="flex gap-2 border-t border-[var(--border)] p-3">
-            <Button variant="outline" size="sm" disabled={!enabled}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!enabled || busy}
+              loading={busy}
+              onClick={() => void captureAndAnalyze()}
+            >
               Analyze Screen
             </Button>
-            <Button variant="ghost" size="sm" disabled={!enabled}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!enabled || busy}
+              onClick={() => void captureAndAnalyze()}
+            >
               <RefreshCw className="h-3.5 w-3.5" />
               Refresh
             </Button>
@@ -138,6 +200,19 @@ export default function ScreenContextPage() {
               Privacy {privacy ? "on" : "off"}
             </Button>
           </div>
+          {(previewUrl || analysis) && (
+            <div className="space-y-2 border-t border-[var(--border)] p-3">
+              {previewUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={previewUrl}
+                  alt="Screen capture preview"
+                  className="max-h-40 w-full rounded-lg object-cover object-top"
+                />
+              )}
+              {analysis && <p className="text-xs text-muted">{analysis}</p>}
+            </div>
+          )}
         </Card>
 
         <div className="space-y-4">

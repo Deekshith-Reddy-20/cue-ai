@@ -14,6 +14,7 @@ import {
   getSession,
   AUTH_BYPASS,
   DEV_GUEST_SESSION,
+  workspaceFromName,
   type CueSession,
 } from "@/lib/auth";
 
@@ -25,11 +26,6 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-function workspaceFromName(name: string) {
-  const first = name.trim().split(/\s+/)[0] || "My";
-  return `${first}'s Workspace`;
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { data: nextSession, status } = useSession();
@@ -60,13 +56,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (nextSession?.user) {
       const name = nextSession.user.name || nextSession.user.email?.split("@")[0] || "User";
       const email = nextSession.user.email || "";
+      // Prefer existing local workspace if same email already signed up.
+      const existing = getSession();
       const oauthSession: CueSession = {
         userId: email || name,
         name,
         email,
-        workspace: workspaceFromName(name),
+        workspace:
+          existing?.email === email && existing.workspace
+            ? existing.workspace
+            : workspaceFromName(name),
       };
-      // Persist so email-local and OAuth share the same app session shape
       localStorage.setItem("cueai-session", JSON.stringify(oauthSession));
       setLocalSession(oauthSession);
       setReady(true);
@@ -79,7 +79,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     if (AUTH_BYPASS) {
-      // Keep a guest session while auth is bypassed.
       localStorage.setItem("cueai-session", JSON.stringify(DEV_GUEST_SESSION));
       setLocalSession({ ...DEV_GUEST_SESSION });
       return;

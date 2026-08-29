@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Folder,
-  MoreHorizontal,
   RefreshCw,
   Search,
   Trash2,
@@ -14,26 +13,74 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { knowledgeDocs } from "@/lib/mock-data";
+import {
+  addKnowledgeFiles,
+  deleteKnowledgeDoc,
+  loadKnowledgeDocs,
+  reindexKnowledgeDocs,
+  type KnowledgeDoc,
+} from "@/lib/knowledge-store";
 import { cn } from "@/lib/utils";
 
 const folders = ["All", "Security", "GTM", "Engineering", "Sales"];
 
 export default function KnowledgePage() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [folder, setFolder] = useState("All");
-  const [selected, setSelected] = useState(knowledgeDocs[0].id);
+  const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = knowledgeDocs.filter((d) => {
+  useEffect(() => {
+    const loaded = loadKnowledgeDocs();
+    setDocs(loaded);
+    setSelected(loaded[0]?.id ?? null);
+  }, []);
+
+  const filtered = docs.filter((d) => {
     const inFolder = folder === "All" || d.folder === folder;
     const inQuery =
       !query ||
       d.name.toLowerCase().includes(query.toLowerCase()) ||
-      d.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()));
+      d.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())) ||
+      d.preview.toLowerCase().includes(query.toLowerCase());
     return inFolder && inQuery;
   });
 
-  const active = knowledgeDocs.find((d) => d.id === selected) ?? knowledgeDocs[0];
+  const active = docs.find((d) => d.id === selected) ?? filtered[0] ?? null;
+
+  async function onUpload(files: FileList | null) {
+    if (!files?.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await addKnowledgeFiles(files);
+      setDocs(next);
+      setSelected(next[0]?.id ?? null);
+      setMessage(`Uploaded ${files.length} file${files.length > 1 ? "s" : ""}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  function onReindex() {
+    const next = reindexKnowledgeDocs();
+    setDocs(next);
+    setMessage("Re-index complete.");
+  }
+
+  function onDelete(id: string) {
+    const next = deleteKnowledgeDoc(id);
+    setDocs(next);
+    setSelected(next[0]?.id ?? null);
+    setMessage("Document deleted.");
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 animate-fade-up">
@@ -43,27 +90,53 @@ export default function KnowledgePage() {
             Knowledge Base
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Semantic search across your docs — cited in every AI answer.
+            Upload docs to your workspace — searchable and cited in AI answers.
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={onReindex} disabled={busy || !docs.length}>
             <RefreshCw className="h-3.5 w-3.5" />
             Re-index
           </Button>
-          <Button variant="gradient" size="sm">
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.txt,.md,.csv,.json,text/*,application/pdf"
+            className="hidden"
+            onChange={(e) => void onUpload(e.target.files)}
+          />
+          <Button
+            variant="gradient"
+            size="sm"
+            loading={busy}
+            onClick={() => inputRef.current?.click()}
+          >
             <Upload className="h-3.5 w-3.5" />
             Upload
           </Button>
         </div>
       </div>
 
+      {(message || error) && (
+        <div
+          className={cn(
+            "rounded-xl border px-4 py-3 text-sm",
+            error
+              ? "border-red-500/30 bg-red-500/10 text-red-200"
+              : "border-teal-500/30 bg-teal-500/10 text-teal-100"
+          )}
+        >
+          {error || message}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-3">
         <div className="min-w-[240px] flex-1">
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Semantic search: “SSO retention policy”…"
+            placeholder="Search uploaded docs…"
             leftIcon={<Search className="h-4 w-4" />}
           />
         </div>
@@ -73,6 +146,7 @@ export default function KnowledgePage() {
         {folders.map((f) => (
           <button
             key={f}
+            type="button"
             onClick={() => setFolder(f)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition",
@@ -92,6 +166,7 @@ export default function KnowledgePage() {
           {filtered.map((doc) => (
             <button
               key={doc.id}
+              type="button"
               onClick={() => setSelected(doc.id)}
               className={cn(
                 "flex w-full items-start gap-3 px-4 py-3.5 text-left transition hover:bg-[var(--surface-hover)]",
@@ -114,40 +189,44 @@ export default function KnowledgePage() {
                   ))}
                 </div>
               </div>
-              <MoreHorizontal className="h-4 w-4 text-subtle" />
             </button>
           ))}
           {filtered.length === 0 && (
-            <p className="p-8 text-center text-sm text-muted">No documents found.</p>
+            <p className="p-8 text-center text-sm text-muted">
+              No documents yet. Click Upload to add files.
+            </p>
           )}
         </Card>
 
         <Card className="p-5">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="font-semibold tracking-tight">{active.name}</h3>
-              <p className="mt-1 text-xs text-subtle">
-                Source · {active.folder} · Indexed
-              </p>
-            </div>
-            <Button variant="ghost" size="icon" aria-label="Delete">
-              <Trash2 className="h-4 w-4 text-red-400" />
-            </Button>
-          </div>
-          <div className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--background)]/50 p-4 text-sm leading-relaxed text-muted">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-subtle">
-              Preview
-            </p>
-            CueAI encrypts meeting data in transit and at rest. Enterprise workspaces can
-            enforce region locks, retention policies, and private model endpoints. Screen
-            Context remains opt-in with per-app exclusions…
-          </div>
-          <div className="mt-4 rounded-xl border border-violet-500/25 bg-violet-500/10 p-3 text-sm">
-            <p className="text-xs font-medium text-violet-300">Semantic hit</p>
-            <p className="mt-1 text-foreground/90">
-              “Retention policies default to 90 days; admins can configure 30–365.”
-            </p>
-          </div>
+          {active ? (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold tracking-tight">{active.name}</h3>
+                  <p className="mt-1 text-xs text-subtle">
+                    Source · {active.folder} · Indexed
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Delete"
+                  onClick={() => onDelete(active.id)}
+                >
+                  <Trash2 className="h-4 w-4 text-red-400" />
+                </Button>
+              </div>
+              <div className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--background)]/50 p-4 text-sm leading-relaxed text-muted whitespace-pre-wrap">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-subtle">
+                  Preview
+                </p>
+                {active.preview || "No preview text extracted for this file."}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted">Upload a document to preview it here.</p>
+          )}
         </Card>
       </div>
     </div>

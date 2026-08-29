@@ -29,15 +29,10 @@ import {
   stopAllListen,
   subscribeListenLevels,
   syncListenSources,
+  transcribeAudioBlob,
   type ListenActiveState,
 } from "./services/audio-listen";
 import type { ScreenshotResult } from "./types/companion";
-
-const transcript = [
-  { who: "Sarah", text: "Can we ship before the board meeting?" },
-  { who: "Alex", text: "If QA finishes by Thursday, yes." },
-  { who: "You", text: "CueAI — what's left in QA?" },
-];
 
 const suggestions = [
   "Summarize risks for the board",
@@ -54,6 +49,7 @@ export default function App() {
     session,
     capture,
     listen,
+    transcript,
     setMode,
     setPinned,
     setOpacity,
@@ -61,12 +57,13 @@ export default function App() {
     setSession,
     setCapture,
     setListen,
+    appendTranscript,
   } = useCompanionStore();
 
   const [ask, setAsk] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [answer, setAnswer] = useState(
-    "QA has 14 SP left. Velocity supports Wednesday EOD finish — Thursday remains buffer before the 5pm deck freeze."
+    "Turn on Mic or System, speak, then turn it off — transcript updates in Chat."
   );
   const [confidence, setConfidence] = useState(0.92);
   const [bookmarkCount, setBookmarkCount] = useState(2);
@@ -83,6 +80,7 @@ export default function App() {
     error: null,
   });
   const [listenBusy, setListenBusy] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [shotBusy, setShotBusy] = useState(false);
   const [shotPreview, setShotPreview] = useState<string | null>(null);
   const [shotMsg, setShotMsg] = useState<string | null>(null);
@@ -119,24 +117,48 @@ export default function App() {
     return subscribeListenLevels(setListenLive);
   }, []);
 
+  async function ingestBlob(blob: Blob | null, who: string) {
+    if (!blob) return;
+    setTranscribing(true);
+    try {
+      const line = await transcribeAudioBlob(blob, who);
+      if (line?.text) {
+        appendTranscript(line);
+        setPanel("transcript");
+        setAnswer(`Heard (${line.who}): ${line.text}`);
+        setConfidence(0.88);
+      }
+    } catch (err) {
+      setShotMsg(err instanceof Error ? err.message : "Transcription failed");
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     setListenBusy(true);
-    void syncListenSources({
-      mic: listen.mic,
-      systemAudio: listen.systemAudio,
-      getDesktopSourceId: async () =>
-        (await window.cueai?.getDesktopAudioSourceId()) ?? null,
-    })
-      .catch(() => {
+    void (async () => {
+      try {
+        const { micBlob, systemBlob } = await syncListenSources({
+          mic: listen.mic,
+          systemAudio: listen.systemAudio,
+          getDesktopSourceId: async () =>
+            (await window.cueai?.getDesktopAudioSourceId()) ?? null,
+        });
+        if (cancelled) return;
+        if (micBlob) await ingestBlob(micBlob, "You");
+        if (systemBlob) await ingestBlob(systemBlob, "System");
+      } catch {
         /* error mirrored via subscribeListenLevels */
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setListenBusy(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listen.mic, listen.systemAudio]);
 
   useEffect(() => {
@@ -192,7 +214,9 @@ export default function App() {
     setEnding(true);
     bumpActivity();
     try {
-      await stopAllListen();
+      const { micBlob, systemBlob } = await stopAllListen();
+      if (micBlob) await ingestBlob(micBlob, "You");
+      if (systemBlob) await ingestBlob(systemBlob, "System");
       await window.cueai?.endSession();
     } finally {
       setEnding(false);
@@ -412,6 +436,11 @@ export default function App() {
                 {listenLive.error}
               </p>
             )}
+            {transcribing && (
+              <p className="rounded-md border border-teal-500/30 bg-teal-500/10 px-2 py-1 text-[10px] text-teal-100">
+                Transcribing listen buffer into chat…
+              </p>
+            )}
             {shotMsg && (
               <p className="rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] text-violet-100">
                 {shotMsg}
@@ -468,12 +497,18 @@ export default function App() {
 
             {mode === "full" && panel === "transcript" && (
               <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/35 p-2 text-[11px]">
-                {transcript.map((line) => (
-                  <p key={line.text}>
-                    <span className="font-medium text-teal-300">{line.who}:</span>{" "}
-                    <span className="text-zinc-100">{line.text}</span>
+                {transcript.length === 0 ? (
+                  <p className="text-zinc-400">
+                    Speak with Mic or System on, then turn it off to update this chat.
                   </p>
-                ))}
+                ) : (
+                  transcript.map((line) => (
+                    <p key={line.id}>
+                      <span className="font-medium text-teal-300">{line.who}:</span>{" "}
+                      <span className="text-zinc-100">{line.text}</span>
+                    </p>
+                  ))
+                )}
               </div>
             )}
 
@@ -686,27 +721,25 @@ export default function App() {
               </button>
             )}
 
-            {mode !== "collapsed" && (
-              <div className="no-drag mt-auto flex items-center gap-2 border-t border-white/10 pt-1.5">
-                <span className="shrink-0 text-[9px] font-medium text-zinc-400">Opacity</span>
-                <input
-                  type="range"
-                  min={35}
-                  max={100}
-                  step={1}
-                  value={Math.round(opacity * 100)}
-                  onChange={(e) => {
-                    bumpActivity();
-                    setOpacity(Number(e.target.value) / 100);
-                  }}
-                  className="h-1 w-full cursor-pointer accent-teal-400"
-                  title={`${Math.round(opacity * 100)}%`}
-                />
-                <span className="w-7 shrink-0 text-right text-[9px] tabular-nums text-zinc-300">
-                  {Math.round(opacity * 100)}%
-                </span>
-              </div>
-            )}
+            <div className="no-drag mt-auto flex items-center gap-2 border-t border-white/10 pt-1.5">
+              <span className="shrink-0 text-[9px] font-medium text-zinc-400">Opacity</span>
+              <input
+                type="range"
+                min={35}
+                max={100}
+                step={1}
+                value={Math.round(opacity * 100)}
+                onChange={(e) => {
+                  bumpActivity();
+                  setOpacity(Number(e.target.value) / 100);
+                }}
+                className="h-1 w-full cursor-pointer accent-teal-400"
+                title={`${Math.round(opacity * 100)}%`}
+              />
+              <span className="w-7 shrink-0 text-right text-[9px] tabular-nums text-zinc-300">
+                {Math.round(opacity * 100)}%
+              </span>
+            </div>
           </div>
         )}
       </div>

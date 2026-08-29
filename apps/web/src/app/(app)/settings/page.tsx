@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bell,
   CreditCard,
@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/components/providers/auth-provider";
 import { DesktopPreferencesPanel } from "@/components/desktop/desktop-preferences";
+import { deleteAccountLocal, updateSessionProfile, workspaceFromName } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const sections = [
@@ -40,7 +41,51 @@ const sections = [
 export default function SettingsPage() {
   const [section, setSection] = useState("profile");
   const { theme, setTheme } = useTheme();
-  const { session } = useAuth();
+  const { session, refresh, logout } = useAuth();
+  const [name, setName] = useState(session?.name || "");
+  const [email, setEmail] = useState(session?.email || "");
+  const [role, setRole] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("cueai-role") || "" : ""
+  );
+  const [workspace, setWorkspace] = useState(session?.workspace || "");
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [apiKey, setApiKey] = useState(() =>
+    typeof window !== "undefined"
+      ? localStorage.getItem("cueai-api-key") || `cue_live_${crypto.randomUUID().slice(0, 8)}`
+      : "cue_live_••••"
+  );
+
+  useEffect(() => {
+    setName(session?.name || "");
+    setEmail(session?.email || "");
+    setWorkspace(session?.workspace || "");
+  }, [session]);
+
+  function saveProfile() {
+    const next = updateSessionProfile({ name, email });
+    if (role.trim()) localStorage.setItem("cueai-role", role.trim());
+    if (next && !workspace.trim()) {
+      updateSessionProfile({ workspace: workspaceFromName(next.name) });
+    }
+    refresh();
+    setSaveMsg("Profile saved.");
+  }
+
+  function saveWorkspace() {
+    const nextName = workspace.trim() || workspaceFromName(name || "My");
+    updateSessionProfile({ workspace: nextName });
+    refresh();
+    setWorkspace(nextName);
+    setSaveMsg("Workspace updated.");
+  }
+
+  async function onDeleteAccount() {
+    if (!window.confirm("Delete this local CueAI account and session?")) return;
+    deleteAccountLocal();
+    await logout();
+    window.location.href = "/signup";
+  }
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 animate-fade-up lg:flex-row">
@@ -77,15 +122,25 @@ export default function SettingsPage() {
                 <CardDescription>Your public workspace identity</CardDescription>
               </div>
             </CardHeader>
-            <Input label="Full name" defaultValue={session?.name || ""} key={session?.name} />
+            <Input label="Full name" value={name} onChange={(e) => setName(e.target.value)} />
             <Input
               label="Email"
-              defaultValue={session?.email || ""}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               type="email"
-              key={session?.email}
             />
-            <Input label="Role" placeholder="Your role" />
-            <Button variant="primary">Save changes</Button>
+            <Input
+              label="Role"
+              placeholder="Your role"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            />
+            <Button variant="primary" onClick={saveProfile}>
+              Save changes
+            </Button>
+            {saveMsg && section === "profile" && (
+              <p className="text-xs text-teal-300">{saveMsg}</p>
+            )}
           </Card>
         )}
 
@@ -219,11 +274,23 @@ export default function SettingsPage() {
             <CardTitle>Workspace</CardTitle>
             <Input
               label="Workspace name"
-              defaultValue={session?.workspace || ""}
-              key={session?.workspace}
+              value={workspace}
+              onChange={(e) => setWorkspace(e.target.value)}
             />
-            <Input label="Slug" defaultValue="acme" />
-            <Button variant="primary">Update workspace</Button>
+            <Input
+              label="Slug"
+              value={workspace
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-|-$/g, "") || "workspace"}
+              readOnly
+            />
+            <Button variant="primary" onClick={saveWorkspace}>
+              Update workspace
+            </Button>
+            {saveMsg && section === "workspace" && (
+              <p className="text-xs text-teal-300">{saveMsg}</p>
+            )}
           </Card>
         )}
 
@@ -231,13 +298,17 @@ export default function SettingsPage() {
           <Card className="space-y-4 p-6">
             <div className="flex items-center justify-between">
               <CardTitle>Billing</CardTitle>
-              <Badge variant="purple">Pro</Badge>
+              <Badge variant="purple">Free</Badge>
             </div>
-            <p className="text-sm text-muted">$79 / seat / month · Renews Aug 28, 2026</p>
-            <div className="rounded-xl border border-[var(--border)] p-4 text-sm">
-              Visa ···· 4242
-            </div>
-            <Button variant="outline">Manage subscription</Button>
+            <p className="text-sm text-muted">
+              You are on the Free plan. Upgrade when you need more seats and live sessions.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => window.open("/#pricing", "_self")}
+            >
+              View plans
+            </Button>
           </Card>
         )}
 
@@ -245,12 +316,24 @@ export default function SettingsPage() {
           <Card className="space-y-4 p-6">
             <CardTitle>API Keys</CardTitle>
             <div className="flex items-center justify-between rounded-xl border border-[var(--border)] px-4 py-3 text-sm">
-              <code className="font-mono text-xs text-muted">cue_live_••••••••3f9a</code>
-              <Button size="sm" variant="ghost">
-                Reveal
+              <code className="font-mono text-xs text-muted">
+                {apiKeyVisible ? apiKey : `${apiKey.slice(0, 10)}••••••••`}
+              </code>
+              <Button size="sm" variant="ghost" onClick={() => setApiKeyVisible((v) => !v)}>
+                {apiKeyVisible ? "Hide" : "Reveal"}
               </Button>
             </div>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const next = `cue_live_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+                setApiKey(next);
+                localStorage.setItem("cueai-api-key", next);
+                setApiKeyVisible(true);
+                setSaveMsg("New API key created locally.");
+              }}
+            >
               Create new key
             </Button>
           </Card>
@@ -260,9 +343,11 @@ export default function SettingsPage() {
           <Card className="space-y-4 border-red-500/30 p-6">
             <CardTitle className="text-red-400">Danger Zone</CardTitle>
             <p className="text-sm text-muted">
-              Permanently delete your account and all meeting data. This cannot be undone.
+              Permanently delete your local CueAI account and session data.
             </p>
-            <Button variant="danger">Delete account</Button>
+            <Button variant="danger" onClick={() => void onDeleteAccount()}>
+              Delete account
+            </Button>
           </Card>
         )}
       </div>

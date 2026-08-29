@@ -1,6 +1,7 @@
 /**
  * Renderer-side listening streams for companion mic + system audio.
  * Streams are kept muted (Analyser only) so CueAI can "listen" without playback echo.
+ * While live, MediaRecorder buffers audio; on stop we return a Blob for transcription.
  */
 
 export type ListenActiveState = {
@@ -18,10 +19,18 @@ type LevelTap = {
   raf: number;
 };
 
+type RecorderBag = {
+  recorder: MediaRecorder;
+  chunks: BlobPart[];
+  mimeType: string;
+};
+
 let micStream: MediaStream | null = null;
 let systemStream: MediaStream | null = null;
 let micTap: LevelTap | null = null;
 let systemTap: LevelTap | null = null;
+let micRec: RecorderBag | null = null;
+let systemRec: RecorderBag | null = null;
 let levelListeners = new Set<(state: ListenActiveState) => void>();
 let lastError: string | null = null;
 
@@ -53,7 +62,6 @@ function attachTap(stream: MediaStream): LevelTap {
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 256;
   source.connect(analyser);
-  // Do not connect to destination — silent listen.
   const tap: LevelTap = { ctx, analyser, source, raf: 0 };
   const tick = () => {
     emit();
@@ -77,6 +85,64 @@ function releaseTap(tap: LevelTap | null) {
 
 function stopStream(stream: MediaStream | null) {
   stream?.getTracks().forEach((t) => t.stop());
+}
+
+function pickMimeType() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4",
+  ];
+  for (const type of candidates) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) {
+      return type;
+    }
+  }
+  return "";
+}
+
+function startRecorder(stream: MediaStream): RecorderBag | null {
+  if (typeof MediaRecorder === "undefined") return null;
+  const audioOnly = new MediaStream(stream.getAudioTracks());
+  if (!audioOnly.getAudioTracks().length) return null;
+  try {
+    const mimeType = pickMimeType();
+    const recorder = mimeType
+      ? new MediaRecorder(audioOnly, { mimeType })
+      : new MediaRecorder(audioOnly);
+    const bag: RecorderBag = {
+      recorder,
+      chunks: [],
+      mimeType: recorder.mimeType || mimeType || "audio/webm",
+    };
+    recorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) bag.chunks.push(ev.data);
+    };
+    recorder.start(1000);
+    return bag;
+  } catch {
+    return null;
+  }
+}
+
+async function stopRecorder(bag: RecorderBag | null): Promise<Blob | null> {
+  if (!bag) return null;
+  const { recorder, chunks, mimeType } = bag;
+  if (recorder.state === "inactive") {
+    return chunks.length ? new Blob(chunks, { type: mimeType }) : null;
+  }
+  return new Promise((resolve) => {
+    recorder.onstop = () => {
+      resolve(chunks.length ? new Blob(chunks, { type: mimeType }) : null);
+    };
+    try {
+      recorder.requestData();
+    } catch {
+      /* ignore */
+    }
+    recorder.stop();
+  });
 }
 
 export function subscribeListenLevels(cb: (state: ListenActiveState) => void) {
@@ -106,6 +172,7 @@ export async function startMicListen(): Promise<void> {
       video: false,
     });
     micTap = attachTap(micStream);
+    micRec = startRecorder(micStream);
     emit();
   } catch (err) {
     lastError = err instanceof Error ? err.message : "Microphone permission denied";
@@ -114,15 +181,20 @@ export async function startMicListen(): Promise<void> {
   }
 }
 
-export async function stopMicListen(): Promise<void> {
+export async function stopMicListen(): Promise<Blob | null> {
+  const blob = await stopRecorder(micRec);
+  micRec = null;
   releaseTap(micTap);
   micTap = null;
   stopStream(micStream);
   micStream = null;
   emit();
+  return blob;
 }
 
-export async function startSystemAudioListen(getSourceId: () => Promise<string | null>): Promise<void> {
+export async function startSystemAudioListen(
+  getSourceId: () => Promise<string | null>
+): Promise<void> {
   if (systemStream) return;
   lastError = null;
   try {
@@ -131,8 +203,6 @@ export async function startSystemAudioListen(getSourceId: () => Promise<string |
       throw new Error("No system audio source available");
     }
 
-    // Electron desktop capture: video constraint is required on many platforms
-    // even when we only care about loopback audio.
     const constraints = {
       audio: {
         mandatory: {
@@ -161,6 +231,7 @@ export async function startSystemAudioListen(getSourceId: () => Promise<string |
       throw new Error("System audio not available on this display");
     }
     systemTap = attachTap(systemStream);
+    systemRec = startRecorder(systemStream);
     emit();
   } catch (err) {
     lastError = err instanceof Error ? err.message : "System audio capture failed";
@@ -169,35 +240,72 @@ export async function startSystemAudioListen(getSourceId: () => Promise<string |
   }
 }
 
-export async function stopSystemAudioListen(): Promise<void> {
+export async function stopSystemAudioListen(): Promise<Blob | null> {
+  const blob = await stopRecorder(systemRec);
+  systemRec = null;
   releaseTap(systemTap);
   systemTap = null;
   stopStream(systemStream);
   systemStream = null;
   emit();
+  return blob;
 }
 
 export async function syncListenSources(opts: {
   mic: boolean;
   systemAudio: boolean;
   getDesktopSourceId: () => Promise<string | null>;
-}) {
+}): Promise<{ micBlob: Blob | null; systemBlob: Blob | null }> {
+  let micBlob: Blob | null = null;
+  let systemBlob: Blob | null = null;
+
   if (opts.mic) {
     if (!micStream) await startMicListen();
-  } else {
-    await stopMicListen();
+  } else if (micStream) {
+    micBlob = await stopMicListen();
   }
 
   if (opts.systemAudio) {
     if (!systemStream) await startSystemAudioListen(opts.getDesktopSourceId);
-  } else {
-    await stopSystemAudioListen();
+  } else if (systemStream) {
+    systemBlob = await stopSystemAudioListen();
   }
+
+  return { micBlob, systemBlob };
 }
 
-export async function stopAllListen() {
-  await stopMicListen();
-  await stopSystemAudioListen();
+export async function stopAllListen(): Promise<{
+  micBlob: Blob | null;
+  systemBlob: Blob | null;
+}> {
+  const micBlob = micStream ? await stopMicListen() : null;
+  const systemBlob = systemStream ? await stopSystemAudioListen() : null;
   lastError = null;
   emit();
+  return { micBlob, systemBlob };
+}
+
+export async function transcribeAudioBlob(
+  blob: Blob,
+  who: string,
+  apiBase = "http://127.0.0.1:3000"
+): Promise<{ who: string; text: string } | null> {
+  if (!blob || blob.size < 800) return null;
+  const body = new FormData();
+  const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : "webm";
+  body.append("audio", blob, `listen.${ext}`);
+  body.append("label", who);
+  const res = await fetch(`${apiBase.replace(/\/$/, "")}/api/transcribe`, {
+    method: "POST",
+    body,
+  });
+  const data = (await res.json()) as {
+    text?: string;
+    who?: string;
+    error?: string;
+    empty?: boolean;
+  };
+  if (!res.ok) throw new Error(data.error || "Transcription failed");
+  if (!data.text?.trim()) return null;
+  return { who: data.who || who, text: data.text.trim() };
 }

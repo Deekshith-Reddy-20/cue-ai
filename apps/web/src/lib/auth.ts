@@ -17,17 +17,29 @@ export type CueSession = {
 const USERS_KEY = "cueai-users";
 const SESSION_KEY = "cueai-session";
 
-/** Temporary local bypass — set NEXT_PUBLIC_SKIP_AUTH=false to re-enable login. */
+/**
+ * Auth bypass is OFF by default so Start free / signup creates a real user workspace.
+ * Set NEXT_PUBLIC_SKIP_AUTH=true only for local demos without login.
+ */
 export const AUTH_BYPASS =
-  process.env.NEXT_PUBLIC_SKIP_AUTH !== "false" &&
-  process.env.NEXT_PUBLIC_SKIP_AUTH !== "0";
+  process.env.NEXT_PUBLIC_SKIP_AUTH === "true" ||
+  process.env.NEXT_PUBLIC_SKIP_AUTH === "1";
 
 export const DEV_GUEST_SESSION: CueSession = {
   userId: "dev-guest",
-  name: "Indra",
-  email: "dev@cueai.local",
-  workspace: "Indra's Workspace",
+  name: "User",
+  email: "user@cueai.local",
+  workspace: "Your Workspace",
 };
+
+function isLegacyIndraSession(session: CueSession) {
+  return (
+    session.userId === "dev-guest" ||
+    session.name === "Indra" ||
+    /indra/i.test(session.workspace) ||
+    session.email === "dev@cueai.local"
+  );
+}
 
 function readUsers(): CueUser[] {
   if (typeof window === "undefined") return [];
@@ -43,17 +55,33 @@ function writeUsers(users: CueUser[]) {
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
 }
 
+function persistSession(session: CueSession) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  return session;
+}
+
 export function getSession(): CueSession | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    if (raw) return JSON.parse(raw) as CueSession;
+    if (raw) {
+      const session = JSON.parse(raw) as CueSession;
+      // Migrate old hardcoded Indra guest → generic user workspace.
+      if (isLegacyIndraSession(session) && AUTH_BYPASS) {
+        return persistSession({ ...DEV_GUEST_SESSION });
+      }
+      if (isLegacyIndraSession(session) && !AUTH_BYPASS) {
+        // Force re-auth so Start free / signup can set the real user.
+        localStorage.removeItem(SESSION_KEY);
+        return null;
+      }
+      return session;
+    }
   } catch {
     // ignore
   }
   if (AUTH_BYPASS) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(DEV_GUEST_SESSION));
-    return { ...DEV_GUEST_SESSION };
+    return persistSession({ ...DEV_GUEST_SESSION });
   }
   return null;
 }
@@ -65,17 +93,47 @@ function setSession(user: CueUser) {
     email: user.email,
     workspace: user.workspace,
   };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  return session;
+  return persistSession(session);
 }
 
 export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
-function workspaceFromName(name: string) {
+export function workspaceFromName(name: string) {
   const first = name.trim().split(/\s+/)[0] || "My";
   return `${first}'s Workspace`;
+}
+
+export function updateSessionProfile(partial: {
+  name?: string;
+  email?: string;
+  workspace?: string;
+}): CueSession | null {
+  const current = getSession();
+  if (!current) return null;
+  const next: CueSession = {
+    ...current,
+    name: partial.name?.trim() || current.name,
+    email: partial.email?.trim() || current.email,
+    workspace: partial.workspace?.trim() || current.workspace,
+  };
+  persistSession(next);
+
+  // Keep matching local email user in sync when present.
+  const users = readUsers();
+  const idx = users.findIndex((u) => u.id === current.userId || u.email === current.email);
+  if (idx >= 0) {
+    const user = users[idx]!;
+    users[idx] = {
+      ...user,
+      name: next.name,
+      email: next.email.toLowerCase(),
+      workspace: next.workspace,
+    };
+    writeUsers(users);
+  }
+  return next;
 }
 
 export type AuthResult =
@@ -151,4 +209,12 @@ export function greetingFor(name: string) {
   const hi =
     hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   return `${hi}, ${first}`;
+}
+
+export function deleteAccountLocal(): void {
+  const session = getSession();
+  if (session) {
+    writeUsers(readUsers().filter((u) => u.id !== session.userId && u.email !== session.email));
+  }
+  clearSession();
 }

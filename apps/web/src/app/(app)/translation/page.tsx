@@ -33,6 +33,24 @@ export default function TranslationPage() {
   const [lang, setLang] = useState("hi");
   const [bilingual, setBilingual] = useState(true);
   const [mode, setMode] = useState("live");
+  const [copied, setCopied] = useState(false);
+
+  const summaryText =
+    lang === "hi"
+      ? "टीम ने CueAI Companion के लिए तीन-चरणीय एंटरप्राइज़ रोलआउट पर सहमति बनाई। लाइव सुझावों के लिए लेटेंसी लक्ष्य 800ms से कम रखा गया।"
+      : lang === "te"
+        ? "టీమ్ CueAI Companion కోసం మూడు-దశల ఎంటర్‌ప్రైజ్ రోలౌట్‌పై ఏకీభవించింది. లైవ్ సూచనలకు లేటెన్సీ లక్ష్యం 800ms కంటే తక్కువగా ఉంచబడింది."
+        : "The team aligned on a three-phase enterprise rollout for CueAI Companion. Latency targets remain under 800ms for live suggestions.";
+
+  async function copyTranslation() {
+    try {
+      await navigator.clipboard.writeText(summaryText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 animate-fade-up">
@@ -122,15 +140,9 @@ export default function TranslationPage() {
       {mode === "summary" && (
         <Card className="p-5">
           <CardTitle className="mb-3">Translated summary</CardTitle>
-          <p className="text-sm leading-relaxed text-muted">
-            {lang === "hi"
-              ? "टीम ने CueAI Companion के लिए तीन-चरणीय एंटरप्राइज़ रोलआउट पर सहमति बनाई। लाइव सुझावों के लिए लेटेंसी लक्ष्य 800ms से कम रखा गया।"
-              : lang === "te"
-                ? "టీమ్ CueAI Companion కోసం మూడు-దశల ఎంటర్‌ప్రైజ్ రోలౌట్‌పై ఏకీభవించింది. లైవ్ సూచనలకు లేటెన్సీ లక్ష్యం 800ms కంటే తక్కువగా ఉంచబడింది."
-                : "The team aligned on a three-phase enterprise rollout for CueAI Companion. Latency targets remain under 800ms for live suggestions."}
-          </p>
-          <Button className="mt-4" size="sm" variant="outline">
-            Copy translation
+          <p className="text-sm leading-relaxed text-muted">{summaryText}</p>
+          <Button className="mt-4" size="sm" variant="outline" onClick={() => void copyTranslation()}>
+            {copied ? "Copied" : "Copy translation"}
           </Button>
         </Card>
       )}
