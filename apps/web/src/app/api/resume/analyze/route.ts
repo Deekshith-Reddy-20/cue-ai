@@ -257,6 +257,37 @@ export async function POST(request: Request) {
       usedJobDescription: Boolean(jobDescription),
     };
 
+    try {
+      const { randomUUID } = await import("node:crypto");
+      const { getSessionFromRequest } = await import("@/lib/server/api-auth");
+      const { recordUsageEvent } = await import("@/lib/server/usage");
+      const session = await getSessionFromRequest();
+      const estTokens = Math.max(500, Math.round((resumeText.length + jobDescription.length) / 4) + 800);
+      const requestId = randomUUID();
+      await recordUsageEvent(session, {
+        type: "resume_rewrite",
+        quantity: Math.max(1, analysis.rewrites.length),
+        inputTokens: Math.round(estTokens * 0.7),
+        outputTokens: Math.round(estTokens * 0.3),
+        provider: "groq",
+        model: GROQ_MODEL,
+        idempotencyKey: `resume_rewrite:${requestId}`,
+        metadata: { feature: "resume_analyze", requestId },
+      });
+      await recordUsageEvent(session, {
+        type: "tokens",
+        quantity: estTokens,
+        inputTokens: Math.round(estTokens * 0.7),
+        outputTokens: Math.round(estTokens * 0.3),
+        provider: "groq",
+        model: GROQ_MODEL,
+        idempotencyKey: `tokens:resume:${requestId}`,
+        metadata: { feature: "resume_analyze", requestId },
+      });
+    } catch {
+      // usage tracking should never block analysis
+    }
+
     return NextResponse.json(analysis);
   } catch (err) {
     console.error("resume_analyze_error", err);

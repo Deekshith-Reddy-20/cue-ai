@@ -41,6 +41,9 @@ yarn-debug.log*
 !.env.example
 !**/.env.example
 
+# local admin / workspace store
+**/.data/
+
 # vercel
 .vercel
 

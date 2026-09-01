@@ -63,6 +63,33 @@ export async function POST(request: Request) {
       });
     }
 
+    try {
+      const { randomUUID } = await import("node:crypto");
+      const { getSessionFromRequest } = await import("@/lib/server/api-auth");
+      const { recordUsageEvent } = await import("@/lib/server/usage");
+      const session = await getSessionFromRequest();
+      const minutes = Math.max(1, Math.round(file.size / (32_000 * 60)) || 1);
+      const requestId = randomUUID();
+      await recordUsageEvent(session, {
+        type: "meeting_minutes",
+        quantity: minutes,
+        provider: "groq",
+        model: GROQ_STT_MODEL,
+        idempotencyKey: `meeting_minutes:${requestId}`,
+        metadata: { feature: "transcribe", label, requestId },
+      });
+      await recordUsageEvent(session, {
+        type: "tokens",
+        quantity: Math.max(50, Math.round(text.length / 4)),
+        provider: "groq",
+        model: GROQ_STT_MODEL,
+        idempotencyKey: `tokens:transcribe:${requestId}`,
+        metadata: { feature: "transcribe", requestId },
+      });
+    } catch {
+      // ignore usage errors
+    }
+
     return NextResponse.json({
       ok: true,
       text,

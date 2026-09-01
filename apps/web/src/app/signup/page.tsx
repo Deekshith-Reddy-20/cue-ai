@@ -7,7 +7,7 @@ import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Mail, Lock, User, ArrowRight, Sparkles } from "lucide-react";
-import { signupWithEmail, AUTH_BYPASS } from "@/lib/auth";
+import { signupWithEmailApi, AUTH_BYPASS } from "@/lib/auth";
 import { useAuth } from "@/components/providers/auth-provider";
 import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
 
@@ -72,13 +72,13 @@ export default function SignupPage() {
     return <div className="min-h-screen bg-background" />;
   }
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
     const form = new FormData(e.currentTarget);
-    const result = signupWithEmail({
+    const result = await signupWithEmailApi({
       name: String(form.get("name") || ""),
       email: String(form.get("email") || ""),
       password: String(form.get("password") || ""),

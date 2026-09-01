@@ -1,9 +1,13 @@
+import type { WorkspaceRole } from "@/lib/roles";
+import { normalizeRole } from "@/lib/roles";
+
 export type CueUser = {
   id: string;
   name: string;
   email: string;
   password: string;
   workspace: string;
+  role?: WorkspaceRole;
   createdAt: string;
 };
 
@@ -12,6 +16,7 @@ export type CueSession = {
   name: string;
   email: string;
   workspace: string;
+  role?: WorkspaceRole;
 };
 
 const USERS_KEY = "cueai-users";
@@ -30,6 +35,7 @@ export const DEV_GUEST_SESSION: CueSession = {
   name: "User",
   email: "user@cueai.local",
   workspace: "Your Workspace",
+  role: "Admin",
 };
 
 function isLegacyIndraSession(session: CueSession) {
@@ -92,12 +98,129 @@ function setSession(user: CueUser) {
     name: user.name,
     email: user.email,
     workspace: user.workspace,
+    role: normalizeRole(user.role || "User"),
   };
   return persistSession(session);
 }
 
 export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
+}
+
+export type AuthResult =
+  | { ok: true; session: CueSession }
+  | { ok: false; error: string };
+
+export async function loginWithEmailApi(input: {
+  email: string;
+  password: string;
+}): Promise<AuthResult> {
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      user?: {
+        id: string;
+        name: string;
+        email: string;
+        workspace: string;
+        role?: WorkspaceRole;
+      };
+    };
+    if (!res.ok || !data.user) {
+      return { ok: false, error: data.error || "Sign-in failed." };
+    }
+    return {
+      ok: true,
+      session: persistSession({
+        userId: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        workspace: data.user.workspace,
+        role: normalizeRole(data.user.role),
+      }),
+    };
+  } catch {
+    return { ok: false, error: "Unable to reach auth server." };
+  }
+}
+
+export async function signupWithEmailApi(input: {
+  name: string;
+  email: string;
+  password: string;
+}): Promise<AuthResult> {
+  try {
+    const res = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      user?: {
+        id: string;
+        name: string;
+        email: string;
+        workspace: string;
+        role?: WorkspaceRole;
+      };
+    };
+    if (!res.ok || !data.user) {
+      return { ok: false, error: data.error || "Sign-up failed." };
+    }
+    return {
+      ok: true,
+      session: persistSession({
+        userId: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        workspace: data.user.workspace,
+        role: normalizeRole(data.user.role),
+      }),
+    };
+  } catch {
+    return { ok: false, error: "Unable to reach auth server." };
+  }
+}
+
+export async function logoutApi() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    // ignore
+  }
+  clearSession();
+}
+
+export async function syncSessionFromServer(): Promise<CueSession | null> {
+  try {
+    const res = await fetch("/api/auth/me", { cache: "no-store" });
+    if (!res.ok) return getSession();
+    const data = (await res.json()) as {
+      user?: {
+        id: string;
+        name: string;
+        email: string;
+        workspace: string;
+        role?: WorkspaceRole;
+      };
+    };
+    if (!data.user) return getSession();
+    return persistSession({
+      userId: data.user.id,
+      name: data.user.name,
+      email: data.user.email,
+      workspace: data.user.workspace,
+      role: normalizeRole(data.user.role),
+    });
+  } catch {
+    return getSession();
+  }
 }
 
 export function workspaceFromName(name: string) {
@@ -136,10 +259,6 @@ export function updateSessionProfile(partial: {
   return next;
 }
 
-export type AuthResult =
-  | { ok: true; session: CueSession }
-  | { ok: false; error: string };
-
 export function signupWithEmail(input: {
   name: string;
   email: string;
@@ -171,6 +290,7 @@ export function signupWithEmail(input: {
     email,
     password,
     workspace: workspaceFromName(name),
+    role: users.length === 0 ? "Admin" : "User",
     createdAt: new Date().toISOString(),
   };
 

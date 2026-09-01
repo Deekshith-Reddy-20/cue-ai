@@ -19,6 +19,8 @@ import {
 import { Logo } from "@/components/ui/logo";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useAuth } from "@/components/providers/auth-provider";
+import { canAccessAdmin } from "@/lib/roles";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -29,7 +31,7 @@ const nav = [
   { href: "/translation", label: "Translation", icon: Languages },
   { href: "/screen-context", label: "Screen Context", icon: Monitor },
   { href: "/companion", label: "Desktop Companion", icon: AppWindow },
-  { href: "/admin", label: "Admin Portal", icon: Shield },
+  { href: "/admin", label: "Admin Portal", icon: Shield, adminOnly: true as const },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/design-system", label: "Design System", icon: Palette },
 ];
@@ -55,6 +57,8 @@ function isNavActive(pathname: string, href: string): boolean {
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { session } = useAuth();
+  const showAdmin = canAccessAdmin(session?.role);
 
   return (
     <aside
@@ -98,35 +102,37 @@ export function Sidebar() {
             Workspace
           </p>
         )}
-        {nav.map((item) => {
-          const active = isNavActive(pathname, item.href);
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={collapsed ? item.label : undefined}
-              className={cn(
-                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                active
-                  ? "bg-[var(--surface-active)] text-foreground"
-                  : "text-muted hover:bg-[var(--surface-hover)] hover:text-foreground",
-                collapsed && "justify-center px-2"
-              )}
-            >
-              <Icon
+        {nav
+          .filter((item) => !item.adminOnly || showAdmin)
+          .map((item) => {
+            const active = isNavActive(pathname, item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={collapsed ? item.label : undefined}
                 className={cn(
-                  "h-[18px] w-[18px] shrink-0 transition-transform group-hover:scale-105",
-                  active && "text-foreground"
+                  "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                  active
+                    ? "bg-[var(--surface-active)] text-foreground"
+                    : "text-muted hover:bg-[var(--surface-hover)] hover:text-foreground",
+                  collapsed && "justify-center px-2"
                 )}
-              />
-              {!collapsed && <span className="truncate">{item.label}</span>}
-              {!collapsed && active && (
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-foreground" />
-              )}
-            </Link>
-          );
-        })}
+              >
+                <Icon
+                  className={cn(
+                    "h-[18px] w-[18px] shrink-0 transition-transform group-hover:scale-105",
+                    active && "text-foreground"
+                  )}
+                />
+                {!collapsed && <span className="truncate">{item.label}</span>}
+                {!collapsed && active && (
+                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-foreground" />
+                )}
+              </Link>
+            );
+          })}
       </nav>
     </aside>
   );

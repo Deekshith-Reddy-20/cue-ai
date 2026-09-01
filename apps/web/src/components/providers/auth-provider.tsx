@@ -15,8 +15,11 @@ import {
   AUTH_BYPASS,
   DEV_GUEST_SESSION,
   workspaceFromName,
+  logoutApi,
+  syncSessionFromServer,
   type CueSession,
 } from "@/lib/auth";
+import { normalizeRole } from "@/lib/roles";
 
 type AuthContextValue = {
   session: CueSession | null;
@@ -34,6 +37,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(() => {
     setLocalSession(getSession());
+    void syncSessionFromServer().then((s) => {
+      if (s) setLocalSession(s);
+    });
   }, []);
 
   useEffect(() => {
@@ -56,7 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (nextSession?.user) {
       const name = nextSession.user.name || nextSession.user.email?.split("@")[0] || "User";
       const email = nextSession.user.email || "";
-      // Prefer existing local workspace if same email already signed up.
       const existing = getSession();
       const oauthSession: CueSession = {
         userId: email || name,
@@ -66,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           existing?.email === email && existing.workspace
             ? existing.workspace
             : workspaceFromName(name),
+        role: normalizeRole(existing?.role || "User"),
       };
       localStorage.setItem("cueai-session", JSON.stringify(oauthSession));
       setLocalSession(oauthSession);
@@ -73,8 +79,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setLocalSession(getSession());
-    setReady(true);
+    void syncSessionFromServer().then((s) => {
+      setLocalSession(s);
+      setReady(true);
+    });
   }, [nextSession, status]);
 
   const logout = useCallback(async () => {
@@ -83,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLocalSession({ ...DEV_GUEST_SESSION });
       return;
     }
+    await logoutApi();
     clearSession();
     setLocalSession(null);
     if (status === "authenticated") {
