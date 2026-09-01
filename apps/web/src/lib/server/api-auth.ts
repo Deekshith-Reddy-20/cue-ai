@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { can, type AdminPermission } from "@/lib/roles";
+import { can, type AdminPermission, normalizeRole } from "@/lib/roles";
 import {
   SESSION_COOKIE,
   verifySession,
@@ -39,11 +39,11 @@ export async function getSessionFromRequest(req?: NextRequest): Promise<SessionP
 
   return {
     ...session,
-    role: user.role,
+    role: normalizeRole(user.role),
     name: user.name,
     email: user.email,
     workspace: store.workspace.name,
-    workspaceId: store.workspace.id,
+    workspaceId: user.workspaceId || store.workspace.id,
   };
 }
 
@@ -60,7 +60,7 @@ export async function requireAuth(req?: NextRequest) {
 export async function requirePermission(permission: AdminPermission, req?: NextRequest) {
   const { error, session } = await requireAuth(req);
   if (error || !session) return { error: error || jsonError("Unauthorized", 401), session: null };
-  if (!can(session.role, permission)) {
+  if (!can(normalizeRole(session.role), permission)) {
     return { error: jsonError("Forbidden", 403), session: null };
   }
   return { error: null, session };

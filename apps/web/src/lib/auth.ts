@@ -223,6 +223,33 @@ export async function syncSessionFromServer(): Promise<CueSession | null> {
   }
 }
 
+/** Link OAuth identity to CueAI membership cookie (preserves invited role). */
+export async function syncOAuthMembership(): Promise<CueSession | null> {
+  try {
+    const res = await fetch("/api/auth/oauth-sync", { method: "POST", cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      user?: {
+        id: string;
+        name: string;
+        email: string;
+        workspace: string;
+        role?: WorkspaceRole;
+      };
+    };
+    if (!data.user) return null;
+    return persistSession({
+      userId: data.user.id,
+      name: data.user.name,
+      email: data.user.email,
+      workspace: data.user.workspace,
+      role: normalizeRole(data.user.role),
+    });
+  } catch {
+    return null;
+  }
+}
+
 export function workspaceFromName(name: string) {
   const first = name.trim().split(/\s+/)[0] || "My";
   return `${first}'s Workspace`;

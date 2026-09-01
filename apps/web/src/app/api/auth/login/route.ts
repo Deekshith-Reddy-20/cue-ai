@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { appendAudit, publicUser, readStore, updateStore } from "@/lib/server/db";
+import { normalizeRole } from "@/lib/roles";
 import {
   SESSION_COOKIE,
   sessionCookieOptions,
@@ -19,38 +20,70 @@ export async function POST(req: Request) {
 
   const store = await readStore();
   const user = store.users.find((u) => u.email === email);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
     return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
   }
   if (user.status === "Deactivated") {
     return NextResponse.json({ error: "This account has been deactivated." }, { status: 403 });
   }
+  if (user.status === "Invited") {
+    return NextResponse.json(
+      {
+        error:
+          "Your account was invited but not activated yet. Please sign up with this email to set your password.",
+      },
+      { status: 403 },
+    );
+  }
 
-  await updateStore(async (s) => {
+  const updated = await updateStore(async (s) => {
     const u = s.users.find((x) => x.id === user.id);
-    if (u) u.lastActiveAt = new Date().toISOString();
+    if (!u) return;
+    u.lastActiveAt = new Date().toISOString();
+    // Mark matching invite as active if still "sent"
+    const inv = s.invites.find(
+      (i) =>
+        i.email === u.email &&
+        (i.workspaceId || s.workspace.id) === u.workspaceId &&
+        (i.status === "sent" || i.status === "pending"),
+    );
+    if (inv) {
+      inv.status = "active";
+      if (!inv.acceptedAt) inv.acceptedAt = new Date().toISOString();
+    }
     await appendAudit(s, {
-      actorId: user.id,
-      actorName: user.name,
+      actorId: u.id,
+      actorName: u.name,
       action: "user.login",
       resourceType: "user",
-      resourceId: user.id,
+      resourceId: u.id,
+      metadata: { role: u.role },
     });
   });
 
+  const fresh = updated.users.find((u) => u.id === user.id)!;
+  const role = normalizeRole(fresh.role);
+  const workspaceId = fresh.workspaceId || updated.workspace.id;
+
   const token = signSession({
-    userId: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    workspaceId: store.workspace.id,
-    workspace: store.workspace.name,
+    userId: fresh.id,
+    email: fresh.email,
+    name: fresh.name,
+    role,
+    workspaceId,
+    workspace: updated.workspace.name,
   });
 
   const res = NextResponse.json({
     user: {
-      ...publicUser(user),
-      workspace: store.workspace.name,
+      ...publicUser(fresh),
+      role,
+      workspace: updated.workspace.name,
+      workspaceId,
+    },
+    membership: {
+      workspaceId,
+      role,
     },
   });
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());

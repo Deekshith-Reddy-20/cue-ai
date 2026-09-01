@@ -3,17 +3,22 @@ import { requirePermission } from "@/lib/server/api-auth";
 import { appendAudit, readStore, updateStore } from "@/lib/server/db";
 
 export async function GET(req: NextRequest) {
-  const { error } = await requirePermission("workspace.read", req);
-  if (error) return error;
+  const { error, session } = await requirePermission("workspace.read", req);
+  if (error || !session) return error;
   const store = await readStore();
-  const activeUsers = store.users.filter((u) => u.status === "Active").length;
+  const { scopeUsers, scopeInvites } = await import("@/lib/server/workspace-scope");
+  const users = scopeUsers(store, session.workspaceId);
   return NextResponse.json({
     workspace: {
       id: store.workspace.id,
       name: store.workspace.name,
       seats: store.workspace.seats,
-      activeUsers,
-      pendingInvites: store.invites.filter((i) => i.status === "pending").length,
+      createdAt: store.workspace.createdAt || null,
+      memberCount: users.filter((u) => u.status === "Active").length,
+      invitedCount: users.filter((u) => u.status === "Invited").length,
+      pendingInvites: scopeInvites(store, session.workspaceId).filter(
+        (i) => i.status === "sent" || i.status === "pending",
+      ).length,
     },
   });
 }
@@ -32,6 +37,9 @@ export async function PATCH(req: NextRequest) {
     if (typeof body?.seats === "number" && body.seats >= 1 && body.seats <= 1000) {
       s.workspace.seats = Math.floor(body.seats);
     }
+    if (!s.workspace.createdAt) {
+      s.workspace.createdAt = new Date().toISOString();
+    }
     await appendAudit(s, {
       actorId: session.userId,
       actorName: session.name,
@@ -42,5 +50,12 @@ export async function PATCH(req: NextRequest) {
     });
   });
 
-  return NextResponse.json({ workspace: store.workspace });
+  return NextResponse.json({
+    workspace: {
+      id: store.workspace.id,
+      name: store.workspace.name,
+      seats: store.workspace.seats,
+      createdAt: store.workspace.createdAt || null,
+    },
+  });
 }

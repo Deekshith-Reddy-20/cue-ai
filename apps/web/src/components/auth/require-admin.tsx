@@ -14,8 +14,14 @@ export function RequireAdmin({
   permission?: AdminPermission;
   fallbackHref?: string;
 }) {
-  const { session, ready } = useAuth();
+  const { session, ready, refresh } = useAuth();
   const router = useRouter();
+
+  // Force live role from server before deciding access (avoids stale localStorage User).
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
   const role = session?.role;
   const allowed = permission ? can(role, permission) : canAccessAdmin(role);
 

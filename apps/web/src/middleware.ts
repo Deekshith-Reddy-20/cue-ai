@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   SESSION_COOKIE,
-  canAccessAdminRole,
   verifySessionEdge,
 } from "@/lib/server/session-edge";
 
@@ -9,6 +8,14 @@ const AUTH_BYPASS =
   process.env.NEXT_PUBLIC_SKIP_AUTH === "true" ||
   process.env.NEXT_PUBLIC_SKIP_AUTH === "1";
 
+/**
+ * Middleware only verifies authentication for Admin routes.
+ * Role/permission checks MUST happen in API handlers (requirePermission)
+ * and RequireAdmin, which read the live role from the workspace store.
+ *
+ * Trusting JWT role here caused invited Admins to stay blocked when their
+ * cookie still had role=User after the DB membership was upgraded.
+ */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -33,13 +40,6 @@ export async function middleware(req: NextRequest) {
     const login = new URL("/login", req.url);
     login.searchParams.set("next", pathname);
     return NextResponse.redirect(login);
-  }
-
-  if (!canAccessAdminRole(session.role)) {
-    if (isAdminApi) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 
   return NextResponse.next();

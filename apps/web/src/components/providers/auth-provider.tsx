@@ -14,12 +14,11 @@ import {
   getSession,
   AUTH_BYPASS,
   DEV_GUEST_SESSION,
-  workspaceFromName,
   logoutApi,
+  syncOAuthMembership,
   syncSessionFromServer,
   type CueSession,
 } from "@/lib/auth";
-import { normalizeRole } from "@/lib/roles";
 
 type AuthContextValue = {
   session: CueSession | null;
@@ -36,15 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   const refresh = useCallback(() => {
-    setLocalSession(getSession());
+    // Always prefer live server membership/role over stale localStorage/JWT claims.
     void syncSessionFromServer().then((s) => {
-      if (s) setLocalSession(s);
+      setLocalSession(s);
+      setReady(true);
     });
   }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   useEffect(() => {
     if (AUTH_BYPASS) {
@@ -59,28 +55,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (status === "loading") return;
 
-    if (nextSession?.user) {
-      const name = nextSession.user.name || nextSession.user.email?.split("@")[0] || "User";
-      const email = nextSession.user.email || "";
-      const existing = getSession();
-      const oauthSession: CueSession = {
-        userId: email || name,
-        name,
-        email,
-        workspace:
-          existing?.email === email && existing.workspace
-            ? existing.workspace
-            : workspaceFromName(name),
-        role: normalizeRole(existing?.role || "User"),
-      };
-      localStorage.setItem("cueai-session", JSON.stringify(oauthSession));
-      setLocalSession(oauthSession);
-      setReady(true);
-      return;
-    }
-
-    void syncSessionFromServer().then((s) => {
-      setLocalSession(s);
+    // Server session cookie is source of truth for role.
+    void syncSessionFromServer().then(async (s) => {
+      if (s) {
+        setLocalSession(s);
+        setReady(true);
+        return;
+      }
+      // OAuth authenticated but no CueAI cookie yet — link membership by verified email.
+      if (nextSession?.user?.email) {
+        const linked = await syncOAuthMembership();
+        if (linked) {
+          setLocalSession(linked);
+          setReady(true);
+          return;
+        }
+      }
+      setLocalSession(null);
       setReady(true);
     });
   }, [nextSession, status]);

@@ -23,10 +23,52 @@ export type DbInvite = {
   email: string;
   role: WorkspaceRole;
   invitedBy: string;
-  token: string;
-  status: "pending" | "accepted" | "revoked" | "expired";
+  /** Legacy field; unused in immediate-invite flow (kept for store compatibility). */
+  token?: string;
+  status: "sent" | "active" | "revoked" | "expired" | "pending" | "accepted";
   createdAt: string;
-  expiresAt: string;
+  expiresAt?: string;
+  acceptedAt?: string;
+  sentAt?: string;
+  workspaceId?: string;
+};
+
+export type DbAiProvider = {
+  id: string;
+  name: string;
+  type: "groq" | "openai" | "anthropic" | "custom";
+  enabled: boolean;
+  endpoint: string;
+  apiKeyEnc?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+export type DbAiModel = {
+  id: string;
+  name: string;
+  providerId: string;
+  capability: "chat" | "stt" | "embedding" | "other";
+  enabled: boolean;
+  isDefault: boolean;
+  contextWindow?: number;
+  updatedAt?: string;
+};
+
+export type DbAiConfig = {
+  provider: "groq" | "openai" | "anthropic" | "custom";
+  model: string;
+  enabledProviders: Array<"groq" | "openai" | "anthropic" | "custom">;
+  enabledModels: string[];
+  defaultModel: string;
+  endpoint?: string;
+  apiKeyEnc?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  /** Structured provider catalog (preferred). */
+  providers?: DbAiProvider[];
+  /** Structured model catalog (preferred). */
+  models?: DbAiModel[];
 };
 
 export type DbKnowledge = {
@@ -73,6 +115,7 @@ export type DbWorkspace = {
   id: string;
   name: string;
   seats: number;
+  createdAt?: string;
   privacy: {
     shareTranscriptsWithTeam: boolean;
     allowAiTrainingOptIn: boolean;
@@ -87,18 +130,6 @@ export type DbWorkspace = {
     knowledgeDays: number;
     autoDeleteEnabled: boolean;
   };
-};
-
-export type DbAiConfig = {
-  provider: "groq" | "openai" | "anthropic" | "custom";
-  model: string;
-  enabledProviders: Array<"groq" | "openai" | "anthropic" | "custom">;
-  enabledModels: string[];
-  defaultModel: string;
-  endpoint?: string;
-  apiKeyEnc?: string;
-  updatedAt?: string;
-  updatedBy?: string;
 };
 
 export type WorkspaceStore = {
@@ -170,14 +201,26 @@ let memory: WorkspaceStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
 async function ensureLoaded(): Promise<WorkspaceStore> {
-  if (memory) return memory;
+  if (memory) {
+    const { ensureAiCatalog } = await import("@/lib/server/ai-config");
+    ensureAiCatalog(memory.ai);
+    return memory;
+  }
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
     const raw = await fs.readFile(STORE_PATH, "utf8");
     memory = JSON.parse(raw) as WorkspaceStore;
+    const { ensureAiCatalog } = await import("@/lib/server/ai-config");
+    ensureAiCatalog(memory.ai);
+    if (!memory.workspace.createdAt) {
+      memory.workspace.createdAt = memory.users[0]?.createdAt || new Date().toISOString();
+    }
     return memory;
   } catch {
     memory = defaultStore();
+    const { ensureAiCatalog } = await import("@/lib/server/ai-config");
+    ensureAiCatalog(memory.ai);
+    memory.workspace.createdAt = new Date().toISOString();
     await persist(memory);
     return memory;
   }
