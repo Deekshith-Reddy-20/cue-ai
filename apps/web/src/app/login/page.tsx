@@ -6,10 +6,11 @@ import { Suspense, useEffect, useState, type FormEvent, type ReactNode } from "r
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, Lock, ArrowRight, Sparkles } from "lucide-react";
+import { Mail, Lock, ArrowRight, Sparkles, Shield } from "lucide-react";
 import { loginWithEmailApi, AUTH_BYPASS } from "@/lib/auth";
 import { useAuth } from "@/components/providers/auth-provider";
 import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
+import { canAccessAdmin } from "@/lib/roles";
 
 function AuthShell({
   title,
@@ -61,7 +62,7 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { refresh } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"user" | "admin" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -89,22 +90,43 @@ function LoginForm() {
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setError(null);
-    setLoading(true);
+    await signIn("user");
+  }
 
-    const form = new FormData(e.currentTarget);
+  async function signIn(destination: "user" | "admin") {
+    setError(null);
+    setLoading(destination);
+
+    const form = document.getElementById("login-form") as HTMLFormElement | null;
+    if (!form?.reportValidity()) {
+      setLoading(null);
+      return;
+    }
+    const data = new FormData(form);
     const result = await loginWithEmailApi({
-      email: String(form.get("email") || ""),
-      password: String(form.get("password") || ""),
+      email: String(data.get("email") || ""),
+      password: String(data.get("password") || ""),
     });
 
     if (!result.ok) {
       setError(result.error);
-      setLoading(false);
+      setLoading(null);
       return;
     }
 
     refresh();
+
+    if (destination === "admin") {
+      if (!canAccessAdmin(result.session.role)) {
+        setError("This account does not have Admin Portal access.");
+        setLoading(null);
+        router.push("/dashboard");
+        return;
+      }
+      router.push("/admin");
+      return;
+    }
+
     router.push("/dashboard");
   }
 
@@ -132,7 +154,7 @@ function LoginForm() {
         </div>
       </div>
 
-      <form className="space-y-4" onSubmit={onSubmit}>
+      <form id="login-form" className="space-y-4" onSubmit={onSubmit}>
         <Input
           label="Email"
           type="email"
@@ -165,17 +187,31 @@ function LoginForm() {
             {error}
           </p>
         )}
-        <Button
-          type="submit"
-          variant="gradient"
-          className="w-full"
-          size="lg"
-          loading={loading}
-          disabled={loading}
-        >
-          Sign in
-          <ArrowRight className="h-4 w-4" />
-        </Button>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Button
+            type="submit"
+            variant="gradient"
+            className="w-full"
+            size="lg"
+            loading={loading === "user"}
+            disabled={loading !== null}
+          >
+            Sign in
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            size="lg"
+            loading={loading === "admin"}
+            disabled={loading !== null}
+            onClick={() => void signIn("admin")}
+          >
+            <Shield className="h-4 w-4" />
+            Admin sign in
+          </Button>
+        </div>
       </form>
     </AuthShell>
   );

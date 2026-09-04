@@ -639,13 +639,6 @@ function AdminPortalInner() {
       <main className="min-w-0 flex-1 space-y-4">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="mb-2 flex flex-wrap gap-2">
-              <Badge variant="purple">Admin</Badge>
-              <Badge variant="info">
-                {overview?.workspace.name || session?.workspace || "Workspace"}
-              </Badge>
-              <Badge>{role}</Badge>
-            </div>
             <h1 className="font-display text-2xl font-semibold tracking-tight">
               {NAV.find((item) => item.id === tab)?.label}
             </h1>
