@@ -13,7 +13,7 @@ import {
   resolveGeminiCredentials,
   type GeminiJsonSchema,
 } from "@/lib/server/gemini";
-import { GroqError, generateGroqText, resolveGroqApiKey } from "@/lib/server/groq";
+import { GroqError, generateGroqText, resolveGroqApiKey, streamGroqText } from "@/lib/server/groq";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -23,8 +23,17 @@ export const maxDuration = 120;
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Accept",
 };
+
+function sseHeaders() {
+  return {
+    ...CORS_HEADERS,
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  };
+}
 
 const ANSWER_SCHEMA: GeminiJsonSchema = {
   type: "OBJECT",
@@ -94,6 +103,7 @@ export async function POST(request: Request) {
           mode?: unknown;
           sessionContext?: unknown;
           image?: unknown;
+          stream?: unknown;
         }
       | null;
 
@@ -102,6 +112,7 @@ export async function POST(request: Request) {
       return json({ error: "prompt is required." }, 400);
     }
 
+    const wantStream = body?.stream === true;
     const transcript = parseTranscript(body?.transcript);
     const mode: LiveAnswerMode =
       typeof body?.mode === "string" &&
@@ -154,6 +165,119 @@ export async function POST(request: Request) {
     const rawImage = typeof body?.image === "string" ? body.image : "";
     const system = buildSystemInstruction(profileContext, hasResume || Boolean(sessionContext));
     const userPrompt = buildUserPrompt({ prompt, transcript, mode, sessionContext });
+
+    // Streaming path: Groq SSE tokens for overlay latency. No images (vision stays JSON).
+    if (wantStream && groqKey && !inlineImage) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = (payload: unknown) => {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+          };
+          try {
+            const result = await streamGroqText({
+              system,
+              prompt: `${userPrompt}\n\nReply with the speakable answer only. No JSON. No preamble.`,
+              temperature: 0.35,
+              maxOutputTokens: 280,
+              signal: request.signal,
+              onToken: (token) => send({ type: "token", text: token }),
+            });
+            send({
+              type: "done",
+              answer: result.text,
+              confidence: 0.78,
+              model: result.model,
+              provider: "groq",
+            });
+            try {
+              const { randomUUID } = await import("node:crypto");
+              const { getSessionFromRequest } = await import("@/lib/server/api-auth");
+              const { recordUsageEvent } = await import("@/lib/server/usage");
+              const session = await getSessionFromRequest();
+              const total = Math.max(1, result.inputTokens + result.outputTokens);
+              await recordUsageEvent(session, {
+                type: "tokens",
+                quantity: total,
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens,
+                provider: "groq",
+                model: result.model,
+                idempotencyKey: `tokens:live_answer_stream:${randomUUID()}`,
+                metadata: { feature: "live_answer_stream", mode },
+              });
+            } catch {
+              // ignore usage errors
+            }
+            if (meetingId) {
+              try {
+                const { appendMeetingExchange } = await import("@/lib/server/meetings");
+                await appendMeetingExchange(meetingId, prompt, result.text);
+              } catch {
+                // never block the overlay on history writes
+              }
+            }
+          } catch (err) {
+            // Gemini fallback when Groq streaming fails.
+            if (credentials) {
+              try {
+                console.error(
+                  "live_answer_stream_groq_fallback",
+                  err instanceof Error ? err.message : err,
+                );
+                const gemini = await generateGeminiText({
+                  credentials,
+                  system,
+                  prompt: userPrompt,
+                  temperature: 0.35,
+                  maxOutputTokens: 280,
+                  thinkingLevel: "MINIMAL",
+                  jsonSchema: ANSWER_SCHEMA,
+                });
+                let answer = gemini.text;
+                let confidence = 0.7;
+                try {
+                  const parsed = JSON.parse(gemini.text) as {
+                    answer?: unknown;
+                    confidence?: unknown;
+                  };
+                  if (typeof parsed.answer === "string" && parsed.answer.trim()) {
+                    answer = parsed.answer.trim();
+                    confidence = clampConfidence(parsed.confidence);
+                  }
+                } catch {
+                  // raw text
+                }
+                send({ type: "token", text: answer });
+                send({
+                  type: "done",
+                  answer,
+                  confidence,
+                  model: gemini.model,
+                  provider: "gemini",
+                });
+              } catch (fallbackErr) {
+                send({
+                  type: "error",
+                  error:
+                    fallbackErr instanceof Error
+                      ? fallbackErr.message
+                      : "Streaming answer failed.",
+                });
+              }
+            } else {
+              send({
+                type: "error",
+                error: err instanceof Error ? err.message : "Streaming answer failed.",
+              });
+            }
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(stream, { status: 200, headers: sseHeaders() });
+    }
 
     let result: {
       text: string;

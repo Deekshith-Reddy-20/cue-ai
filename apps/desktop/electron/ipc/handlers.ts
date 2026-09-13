@@ -212,12 +212,11 @@ export function registerIpcHandlers() {
 
   ipcMain.handle(
     IpcChannels.COMPANION_CAPTURE_SCREENSHOT,
-    async (event, payload?: { save?: boolean }) => {
-      const parent = BrowserWindow.fromWebContents(event.sender);
-      return capturePrimaryScreenshot({
-        save: payload?.save !== false,
-        parent,
-      });
+    async (_event, payload?: { save?: boolean }) => {
+      // Capture is always in-memory. `save: true` is intentionally ignored so
+      // the Screen/Capture button never opens File Explorer / Save dialogs.
+      void payload;
+      return capturePrimaryScreenshot({ save: false });
     }
   );
 

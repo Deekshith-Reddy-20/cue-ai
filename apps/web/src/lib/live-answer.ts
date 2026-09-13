@@ -35,7 +35,7 @@ const MODE_INSTRUCTIONS: Record<LiveAnswerMode, string> = {
   risks: "Name the risks or objections that are live right now, most urgent first.",
   explain: "Explain the last topic in plain language a non-expert could follow.",
   screen:
-    "Look at the attached screenshot. First describe what is happening on screen. Then give a first-person interview-ready answer the user can say out loud.",
+    "Look at the attached screenshot. Identify the question, coding problem, multiple-choice item, or task visible on screen. Answer it directly and accurately. If it is multiple choice, give the correct option and a brief reason. If there is code, solve or explain what is asked. Ignore the CueAI overlay and unrelated chrome. Do not narrate the screenshot — lead with the speakable answer.",
 };
 
 /** Guess the mode from a chip label or free-text prompt. */
@@ -103,7 +103,7 @@ export function buildUserPrompt(input: {
     "",
     `TASK: ${MODE_INSTRUCTIONS[input.mode]}`,
     input.mode === "screen"
-      ? "A screenshot is attached. Reply as: On screen: <what is visible>. Say: <interview-ready first-person answer or next step>. Do not invent details that are not on screen."
+      ? "A screenshot is attached. Answer the visible question/task. Do not describe the UI. Format: Say: <direct answer>. For MCQ include the option letter/text."
       : "If this is an interview, give the user a ready-to-say answer that uses their resume and the job context.",
     "",
     "USER REQUEST:",

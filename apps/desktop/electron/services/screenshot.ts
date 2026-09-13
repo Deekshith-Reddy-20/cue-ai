@@ -1,7 +1,5 @@
-import { BrowserWindow, desktopCapturer, dialog, screen } from "electron";
-import fs from "node:fs/promises";
+import { BrowserWindow, desktopCapturer, screen, type Display } from "electron";
 import { getCompanionWindow } from "../windows/companion-window";
-import { getCaptureProtectionStatus } from "./screen-share";
 import { getStoreValue } from "./store";
 
 export type ScreenshotResult = {
@@ -9,35 +7,70 @@ export type ScreenshotResult = {
   dataUrl?: string;
   savedPath?: string | null;
   error?: string;
+  meta?: {
+    width: number;
+    height: number;
+    bytes: number;
+    displayId: number;
+  };
 };
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function displayForCompanion(companion: BrowserWindow | null): Display {
+  try {
+    if (companion && !companion.isDestroyed()) {
+      const b = companion.getBounds();
+      const cx = Math.round(b.x + b.width / 2);
+      const cy = Math.round(b.y + b.height / 2);
+      return screen.getDisplayNearestPoint({ x: cx, y: cy });
+    }
+  } catch {
+    // fall through
+  }
+  return screen.getPrimaryDisplay();
+}
+
 /**
- * Capture the primary display as a PNG.
- * Keep the overlay process alive — only fade it out if capture-exclusion is off.
+ * Capture the display under the companion as an in-memory PNG data URL.
+ * Never opens a file picker / save dialog.
+ * Briefly fades the overlay so the underlying page is what gets captured
+ * (even when OS content-protection is uneven across capture APIs).
  */
-export async function capturePrimaryScreenshot(opts?: {
+export async function capturePrimaryScreenshot(_opts?: {
+  /** Ignored — Capture is always in-memory. Kept for API compatibility. */
   save?: boolean;
   parent?: BrowserWindow | null;
 }): Promise<ScreenshotResult> {
   const companion = getCompanionWindow();
   const canHideOverlay = Boolean(companion && !companion.isDestroyed() && companion.isVisible());
-  const excluded = getCaptureProtectionStatus().applied;
   const previousOpacity = canHideOverlay ? companion!.getOpacity() : 1;
 
+  console.log("[CAPTURE] Capture requested");
+
   try {
-    if (canHideOverlay && !excluded) {
+    if (canHideOverlay) {
+      console.log("[CAPTURE] Overlay hidden");
+      companion!.setIgnoreMouseEvents(true);
       companion!.setOpacity(0);
-      await sleep(80);
+      // One frame + paint settle so the page behind is visible to desktopCapturer.
+      await sleep(90);
     }
 
-    const display = screen.getPrimaryDisplay();
+    const display = displayForCompanion(companion);
+    console.log("[CAPTURE] Display detected", { id: display.id, scale: display.scaleFactor });
+
     const scale = display.scaleFactor || 1;
-    const width = Math.max(1, Math.round(display.size.width * scale));
-    const height = Math.max(1, Math.round(display.size.height * scale));
+    // Cap physical pixels so vision APIs stay fast while text remains readable.
+    const maxEdge = 1920;
+    const fullW = Math.max(1, Math.round(display.size.width * scale));
+    const fullH = Math.max(1, Math.round(display.size.height * scale));
+    const longEdge = Math.max(fullW, fullH);
+    const factor = longEdge > maxEdge ? maxEdge / longEdge : 1;
+    const width = Math.max(1, Math.round(fullW * factor));
+    const height = Math.max(1, Math.round(fullH * factor));
 
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
@@ -45,49 +78,50 @@ export async function capturePrimaryScreenshot(opts?: {
     });
 
     const source =
-      sources.find((s) => s.display_id && String(display.id) === s.display_id) || sources[0];
+      sources.find((s) => s.display_id && String(display.id) === s.display_id) ||
+      sources.find((s) => s.id.includes(String(display.id))) ||
+      sources[0];
 
     if (!source || source.thumbnail.isEmpty()) {
-      return { ok: false, error: "Could not capture the screen." };
+      console.log("[CAPTURE] Screenshot failed — empty source");
+      return { ok: false, error: "Screen capture failed. Please try again." };
     }
 
-    const png = source.thumbnail.toPNG();
-    const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+    // JPEG keeps payload smaller for vision without wrecking text.
+    const jpeg = source.thumbnail.toJPEG(82);
+    const dataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    const size = source.thumbnail.getSize();
 
-    let savedPath: string | null = null;
-    if (opts?.save !== false) {
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const parent =
-        opts?.parent && !opts.parent.isDestroyed()
-          ? opts.parent
-          : BrowserWindow.getFocusedWindow() ?? undefined;
-      const result = parent
-        ? await dialog.showSaveDialog(parent, {
-            title: "Save CueAI screenshot",
-            defaultPath: `cueai-screenshot-${stamp}.png`,
-            filters: [{ name: "PNG Image", extensions: ["png"] }],
-          })
-        : await dialog.showSaveDialog({
-            title: "Save CueAI screenshot",
-            defaultPath: `cueai-screenshot-${stamp}.png`,
-            filters: [{ name: "PNG Image", extensions: ["png"] }],
-          });
-      if (!result.canceled && result.filePath) {
-        await fs.writeFile(result.filePath, png);
-        savedPath = result.filePath;
-      }
-    }
+    console.log("[CAPTURE] Screenshot captured", {
+      width: size.width,
+      height: size.height,
+      bytes: jpeg.length,
+    });
+    console.log("[CAPTURE] Screenshot size:", `${size.width}x${size.height}`, jpeg.length);
 
-    return { ok: true, dataUrl, savedPath };
+    return {
+      ok: true,
+      dataUrl,
+      savedPath: null,
+      meta: {
+        width: size.width,
+        height: size.height,
+        bytes: jpeg.length,
+        displayId: display.id,
+      },
+    };
   } catch (err) {
+    console.error("[CAPTURE] Screenshot failed", err);
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Screenshot failed",
+      error: err instanceof Error ? err.message : "Screen capture failed. Please try again.",
     };
   } finally {
     if (canHideOverlay && companion && !companion.isDestroyed()) {
       const stored = Number(getStoreValue("companionOpacity")) || previousOpacity || 1;
       companion.setOpacity(Math.min(1, Math.max(0.35, stored)));
+      companion.setIgnoreMouseEvents(false);
+      console.log("[CAPTURE] Overlay restored");
     }
   }
 }
