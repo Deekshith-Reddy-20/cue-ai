@@ -17,7 +17,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     if (!ready || AUTH_BYPASS) return;
     const next = encodeURIComponent(pathname || "/dashboard");
     if (!session) {
-      router.replace(`/signup?next=${next}`);
+      router.replace(`/login?next=${next}`);
       return;
     }
     if (needsOnboarding) {
@@ -36,7 +36,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (!AUTH_BYPASS && !session) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted">
-        Redirecting to sign up…
+        Redirecting to sign in…
       </div>
     );
   }

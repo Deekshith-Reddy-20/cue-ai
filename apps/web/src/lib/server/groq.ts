@@ -13,6 +13,13 @@ const MODEL_FALLBACKS = [
   "llama-3.3-70b-versatile",
 ].filter((v, i, arr) => arr.indexOf(v) === i);
 
+/** Prefer low-latency models for live overlay streaming. */
+const STREAM_MODEL_FALLBACKS = [
+  process.env.GROQ_STREAM_MODEL?.trim() || "llama-3.1-8b-instant",
+  "llama-3.3-70b-versatile",
+  GROQ_DEFAULT_MODEL,
+].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
 export class GroqError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -121,7 +128,7 @@ export async function streamGroqText(req: {
   let lastStatus = 502;
   let lastMessage = "Groq did not return an answer.";
 
-  for (const model of MODEL_FALLBACKS) {
+  for (const model of STREAM_MODEL_FALLBACKS) {
     const res = await fetch(GROQ_CHAT_URL, {
       method: "POST",
       headers: {
@@ -131,8 +138,8 @@ export async function streamGroqText(req: {
       signal: req.signal,
       body: JSON.stringify({
         model,
-        temperature: req.temperature ?? 0.35,
-        max_completion_tokens: req.maxOutputTokens ?? 280,
+        temperature: req.temperature ?? 0.3,
+        max_completion_tokens: req.maxOutputTokens ?? 160,
         stream: true,
         messages: [
           ...(req.system ? [{ role: "system" as const, content: req.system }] : []),

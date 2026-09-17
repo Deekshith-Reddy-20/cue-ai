@@ -45,6 +45,7 @@ yarn-debug.log*
 
 # local admin / workspace store
 **/.data/
+**/.data-e2e/
 
 # ngrok local agent secrets (authtoken)
 ngrok.yml.local

@@ -14,6 +14,9 @@ export type LiveAnswer = {
 };
 
 let apiBase = "http://127.0.0.1:3000";
+let cachedSessionContext = "";
+let cachedSessionAt = 0;
+const SESSION_CACHE_MS = 30_000;
 
 export function configureAnswerApi(base: string) {
   if (base) apiBase = base.replace(/\/$/, "");
@@ -27,6 +30,10 @@ export class LiveAnswerUnavailable extends Error {
 }
 
 async function loadSessionContext() {
+  const now = Date.now();
+  if (cachedSessionContext && now - cachedSessionAt < SESSION_CACHE_MS) {
+    return cachedSessionContext;
+  }
   try {
     const res = await fetch(`${apiBase}/api/live/briefing`, { cache: "no-store" });
     const data = (await res.json().catch(() => ({}))) as {
@@ -41,20 +48,26 @@ async function loadSessionContext() {
       } | null;
     };
     if (!data.briefing?.resumeText && !data.briefing?.jobDescription && !data.briefing?.company) {
+      cachedSessionContext = "";
+      cachedSessionAt = now;
       return "";
     }
     const b = data.briefing;
-    return [
+    // Cap resume text so prompt stays small for first-token latency.
+    const resume = (b.resumeText || "").slice(0, 3500);
+    cachedSessionContext = [
       b.company ? `Interview at: ${b.company}` : "",
-      b.jobDescription ? `Job description:\n${b.jobDescription}` : "",
+      b.jobDescription ? `Job description:\n${String(b.jobDescription).slice(0, 1200)}` : "",
       b.resumeName ? `Resume on file: ${b.resumeName}` : "",
-      b.resumeText ? `CANDIDATE RESUME:\n${b.resumeText}` : "",
-      b.description ? `Context:\n${b.description}` : "",
+      resume ? `CANDIDATE RESUME:\n${resume}` : "",
+      b.description ? `Context:\n${String(b.description).slice(0, 600)}` : "",
     ]
       .filter(Boolean)
       .join("\n");
+    cachedSessionAt = now;
+    return cachedSessionContext;
   } catch {
-    return "";
+    return cachedSessionContext;
   }
 }
 

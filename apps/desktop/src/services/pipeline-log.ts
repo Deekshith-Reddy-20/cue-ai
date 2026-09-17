@@ -1,9 +1,10 @@
 /**
  * Structured latency / pipeline logs for the live overlay.
- * Never log API keys or raw audio bytes.
+ * Never log API keys, raw audio, or full answer text.
  */
 
 export type LatencyMarks = {
+  speechStart?: number;
   audioEnd?: number;
   transcriptionFinal?: number;
   questionDetected?: number;
@@ -20,7 +21,13 @@ const PREFIX: Record<string, string> = {
   response: "[AI RESPONSE]",
   fallback: "[FALLBACK]",
   overlay: "[OVERLAY]",
+  perf: "[PERF]",
 };
+
+function ms(from?: number, to?: number) {
+  if (from == null || to == null) return undefined;
+  return Math.round(to - from);
+}
 
 export function pipelineLog(
   area: keyof typeof PREFIX,
@@ -37,32 +44,57 @@ export function pipelineLog(
 
 export function createLatencyTracker(label: string) {
   const marks: LatencyMarks = {};
-  const started = performance.now();
+  const t0 = performance.now();
 
-  function mark(key: keyof LatencyMarks) {
-    marks[key] = performance.now();
+  function mark(key: keyof LatencyMarks, at = performance.now()) {
+    if (marks[key] == null) marks[key] = at;
   }
 
-  function report(stage: string) {
-    const q = marks.questionDetected ?? marks.audioEnd ?? started;
-    const first = marks.firstToken;
-    const visible = marks.answerVisible;
-    pipelineLog("response", stage, {
-      label: label.slice(0, 80),
-      question_to_first_token_ms:
-        first != null ? Math.round(first - q) : undefined,
-      question_to_answer_visible_ms:
-        visible != null ? Math.round(visible - q) : undefined,
-      transcription_ms:
-        marks.transcriptionFinal != null && marks.audioEnd != null
-          ? Math.round(marks.transcriptionFinal - marks.audioEnd)
-          : undefined,
-      ai_ms:
-        marks.aiRequest != null && (first ?? visible) != null
-          ? Math.round((first ?? visible)! - marks.aiRequest)
-          : undefined,
-    });
+  function report(stage = "pipeline") {
+    const speechEnd = marks.audioEnd ?? marks.questionDetected ?? t0;
+    const abs = (v?: number) =>
+      v == null ? undefined : Number(((v - speechEnd) / 1000).toFixed(3));
+
+    console.log("[PERF] Speech ended:", `${(0).toFixed(3)}s`);
+    if (marks.transcriptionFinal != null) {
+      console.log("[PERF] Transcript finalized:", `${abs(marks.transcriptionFinal)}s`);
+    }
+    if (marks.questionDetected != null) {
+      console.log("[PERF] Question finalized:", `${abs(marks.questionDetected)}s`);
+    }
+    if (marks.aiRequest != null) {
+      console.log("[PERF] AI request started:", `${abs(marks.aiRequest)}s`);
+    }
+    if (marks.firstToken != null) {
+      console.log("[PERF] First token:", `${abs(marks.firstToken)}s`);
+    }
+    if (marks.answerVisible != null) {
+      console.log("[PERF] Answer visible:", `${abs(marks.answerVisible)}s`);
+    }
+
+    const total = ms(speechEnd, marks.answerVisible ?? marks.firstToken);
+    console.log(
+      "[PERF] TOTAL RESPONSE LATENCY:",
+      total != null ? `${(total / 1000).toFixed(2)}s` : "n/a",
+      {
+        stage,
+        label: label.slice(0, 60),
+        speech_end_to_transcript_ms: ms(marks.audioEnd, marks.transcriptionFinal),
+        transcript_to_question_ms: ms(marks.transcriptionFinal, marks.questionDetected),
+        question_to_ai_ms: ms(marks.questionDetected, marks.aiRequest),
+        ai_to_first_token_ms: ms(marks.aiRequest, marks.firstToken),
+        first_token_to_visible_ms: ms(marks.firstToken, marks.answerVisible),
+        speech_end_to_visible_ms: total,
+      },
+    );
   }
 
   return { marks, mark, report };
+}
+
+/** Fire-and-forget warm-up so the first live answer reuses a hot HTTP path. */
+export function prewarmAnswerApi(apiBase: string) {
+  const base = apiBase.replace(/\/$/, "");
+  if (!base) return;
+  void fetch(`${base}/api/live/briefing`, { cache: "no-store" }).catch(() => undefined);
 }

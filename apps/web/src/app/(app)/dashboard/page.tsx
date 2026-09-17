@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { motion, type Variants } from "framer-motion";
 import {
   ArrowUpRight,
@@ -18,12 +19,6 @@ import {
   YAxis,
 } from "recharts";
 import { Progress } from "@/components/ui/misc";
-import {
-  activity,
-  recentMeetings,
-  stats,
-  usageSeries,
-} from "@/lib/mock-data";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useTheme } from "@/components/providers/theme-provider";
 import { greetingFor } from "@/lib/auth";
@@ -42,11 +37,14 @@ const fade: Variants = {
   }),
 };
 
-const resources = [
-  { label: "AI tokens", value: 68, hint: "340k / 500k" },
-  { label: "Storage", value: 42, hint: "8.4 GB / 20 GB" },
-  { label: "Desktop Companion", value: 91, hint: "Connected" },
-];
+type MeetingRow = {
+  id: string;
+  title: string;
+  status?: string;
+  startedAt?: string;
+  durationSec?: number;
+  attendees?: number;
+};
 
 const quickActions = [
   { href: "/resume", icon: FileText, label: "Tailor a resume" },
@@ -54,6 +52,22 @@ const quickActions = [
   { href: "/screen-context", icon: Monitor, label: "Enable Screen AI" },
   { href: "/translation", icon: Sparkles, label: "Start translation" },
 ];
+
+const emptyUsage = [
+  { day: "Mon", tokens: 0 },
+  { day: "Tue", tokens: 0 },
+  { day: "Wed", tokens: 0 },
+  { day: "Thu", tokens: 0 },
+  { day: "Fri", tokens: 0 },
+  { day: "Sat", tokens: 0 },
+  { day: "Sun", tokens: 0 },
+];
+
+function formatDuration(sec?: number) {
+  if (!sec || sec <= 0) return "—";
+  const m = Math.round(sec / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
 
 export default function DashboardPage() {
   const { session, ready } = useAuth();
@@ -71,9 +85,64 @@ export default function DashboardPage() {
     color: isLight ? "#090909" : "#ffffff",
   };
 
+  const [meetings, setMeetings] = useState<MeetingRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/meetings", { cache: "no-store" });
+        const data = (await res.json().catch(() => ({}))) as {
+          meetings?: MeetingRow[];
+        };
+        if (!cancelled) setMeetings(Array.isArray(data.meetings) ? data.meetings : []);
+      } catch {
+        if (!cancelled) setMeetings([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const meetingCount = meetings.length;
+  const pinnedAnswers = 0;
+  const hoursTranscribed = meetings.reduce(
+    (sum, m) => sum + (typeof m.durationSec === "number" ? m.durationSec : 0),
+    0,
+  );
+  const hoursLabel = (hoursTranscribed / 3600).toFixed(1);
+
+  const stats = [
+    {
+      label: "Meetings this week",
+      value: loaded ? String(meetingCount) : "—",
+      delta: loaded ? (meetingCount ? "From your workspace" : "No meetings yet") : "Loading…",
+    },
+    {
+      label: "Completed sessions",
+      value: loaded ? String(meetingCount) : "—",
+      delta: loaded ? (meetingCount ? "Saved history" : "None yet") : "Loading…",
+    },
+    {
+      label: "Hours transcribed",
+      value: loaded ? hoursLabel : "—",
+      delta: loaded ? (hoursTranscribed ? "From saved sessions" : "No activity data yet") : "Loading…",
+    },
+    {
+      label: "AI answers pinned",
+      value: loaded ? String(pinnedAnswers) : "—",
+      delta: loaded ? (pinnedAnswers ? "Saved" : "None pinned yet") : "Loading…",
+    },
+  ];
+
+  const recent = meetings.filter((m) => m.status !== "live").slice(0, 5);
+
   return (
     <div data-dashboard>
-      {/* Hero strip */}
       <motion.header
         className="db-hero"
         custom={0}
@@ -93,7 +162,6 @@ export default function DashboardPage() {
         </div>
       </motion.header>
 
-      {/* Metrics row */}
       <div className="db-metrics">
         {stats.map((s, i) => (
           <motion.div
@@ -107,14 +175,15 @@ export default function DashboardPage() {
             <p className="db-metric-label">{s.label}</p>
             <p className="db-metric-value">{s.value}</p>
             <p className="db-metric-delta">
-              <ArrowUpRight className="mr-0.5 inline h-3 w-3" />
+              {meetingCount > 0 && i === 0 ? (
+                <ArrowUpRight className="mr-0.5 inline h-3 w-3" />
+              ) : null}
               {s.delta}
             </p>
           </motion.div>
         ))}
       </div>
 
-      {/* Main: chart + resources */}
       <div className="db-main">
         <motion.section
           className="db-panel"
@@ -126,13 +195,17 @@ export default function DashboardPage() {
           <div className="db-panel-head">
             <div>
               <h2 className="db-section-title">Weekly AI usage</h2>
-              <p className="db-section-sub">Meetings and token volume</p>
+              <p className="db-section-sub">
+                {meetingCount
+                  ? "Based on your saved sessions"
+                  : "No activity data available yet"}
+              </p>
             </div>
             <span className="db-chip">This week</span>
           </div>
           <div className="db-chart">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={usageSeries}>
+              <AreaChart data={emptyUsage}>
                 <defs>
                   <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#0099ff" stopOpacity={0.32} />
@@ -171,26 +244,37 @@ export default function DashboardPage() {
             <p className="db-section-sub">Plan capacity this cycle</p>
           </div>
           <div className="space-y-5">
-            {resources.map((u) => (
-              <div key={u.label}>
-                <div className="db-meter-row">
-                  <span className="db-meter-label">{u.label}</span>
-                  <span className="db-meter-hint">{u.hint}</span>
-                </div>
-                <Progress value={u.value} />
+            <div>
+              <div className="db-meter-row">
+                <span className="db-meter-label">AI tokens</span>
+                <span className="db-meter-hint">No usage data yet</span>
               </div>
-            ))}
+              <Progress value={0} />
+            </div>
+            <div>
+              <div className="db-meter-row">
+                <span className="db-meter-label">Storage</span>
+                <span className="db-meter-hint">No usage data yet</span>
+              </div>
+              <Progress value={0} />
+            </div>
+            <div>
+              <div className="db-meter-row">
+                <span className="db-meter-label">Desktop Companion</span>
+                <span className="db-meter-hint">Check Desktop status</span>
+              </div>
+              <Progress value={0} />
+            </div>
           </div>
           <p className="db-plan-note">
-            Pro plan renews Aug 28 ·{" "}
+            Manage your plan in{" "}
             <Link href="/settings" className="db-link">
-              Manage billing
+              Settings
             </Link>
           </p>
         </motion.section>
       </div>
 
-      {/* Lower: meetings · actions · activity */}
       <div className="db-lower">
         <motion.section
           className="db-panel"
@@ -209,31 +293,32 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div>
-            {recentMeetings.map((m) => (
-              <Link
-                key={m.id}
-                href={
-                  m.status === "live"
-                    ? "/meetings/live"
-                    : `/meetings/${m.id}/summary`
-                }
-                className="db-meeting"
-              >
-                <div>
-                  <p className="db-meeting-title">{m.title}</p>
-                  <p className="db-meeting-meta">
-                    {m.time} · {m.attendees} people
-                  </p>
-                </div>
-                <div className="db-meeting-side">
-                  {m.status === "live" ? (
-                    <span className="db-live">Live</span>
-                  ) : (
-                    m.duration
-                  )}
-                </div>
-              </Link>
-            ))}
+            {recent.length === 0 ? (
+              <p className="db-section-sub" style={{ padding: "12px 0" }}>
+                No meetings yet.
+              </p>
+            ) : (
+              recent.map((m) => (
+                <Link
+                  key={m.id}
+                  href={`/meetings/${m.id}/summary`}
+                  className="db-meeting"
+                >
+                  <div>
+                    <p className="db-meeting-title">{m.title}</p>
+                    <p className="db-meeting-meta">
+                      {m.startedAt || "Saved session"}
+                      {typeof m.attendees === "number"
+                        ? ` · ${m.attendees} people`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="db-meeting-side">
+                    {formatDuration(m.durationSec)}
+                  </div>
+                </Link>
+              ))
+            )}
           </div>
         </motion.section>
 
@@ -268,20 +353,8 @@ export default function DashboardPage() {
             <h2 className="db-section-title">Activity</h2>
           </div>
           <div className="db-activity">
-            {activity.map((a) => (
-              <div key={a.id} className="db-activity-item">
-                <span className="db-activity-dot" />
-                <div>
-                  <p className="db-activity-text">{a.text}</p>
-                  <p className="db-activity-time">{a.time}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="db-pin">
-            <p className="db-pin-label">Pinned answer</p>
-            <p className="db-pin-body">
-              Target p95 &lt; 800ms for suggestion cards during live sessions.
+            <p className="db-section-sub" style={{ padding: "8px 0" }}>
+              No activity data available yet.
             </p>
           </div>
         </motion.section>

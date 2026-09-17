@@ -130,7 +130,8 @@ function LoginForm() {
       return;
     }
 
-    router.push("/dashboard");
+    const next = searchParams.get("next");
+    router.push(next && next.startsWith("/") ? next : "/dashboard");
   }
 
   return (

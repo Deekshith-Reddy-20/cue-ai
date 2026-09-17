@@ -1,40 +1,50 @@
 /**
  * Lightweight question / interview-prompt detection for live auto-answers.
- * Stitches consecutive STT fragments so questions are not cut mid-sentence.
+ * Stitches consecutive STT fragments so questions are not cut mid-sentence,
+ * with a short endpoint window for low latency.
  */
 
 export type QuestionDecision = {
   accept: boolean;
   question: string;
   reason: string;
+  questionId?: string;
 };
 
 const MAX_RECENT = 8;
 const DEDUPE_WINDOW_MS = 45_000;
-const STITCH_WINDOW_MS = 2_800;
-const MIN_CHARS = 12;
+/** Wait for trailing STT fragments when utterance looks incomplete. */
+const STITCH_WINDOW_MS = 700;
+const MIN_CHARS = 10;
 const MAX_CHARS = 600;
 
-const recent: { norm: string; at: number }[] = [];
+const recent: { norm: string; at: number; id: string }[] = [];
 const rolling: { who: string; text: string; at: number }[] = [];
+const processingIds = new Set<string>();
 
 /** In-progress utterance assembly per speaker. */
 const pending: Record<
   string,
-  { parts: string[]; updatedAt: number; timer: ReturnType<typeof setTimeout> | null }
+  {
+    parts: string[];
+    updatedAt: number;
+    audioEndAt?: number;
+    transcribedAt?: number;
+    timer: ReturnType<typeof setTimeout> | null;
+  }
 > = {};
 
 const WH =
   /^(what|whats|what's|why|how|when|where|who|whom|which|whose|can|could|would|should|do|does|did|is|are|was|were|will|have|has|had)\b/i;
 
 const INTERVIEW =
-  /\b(tell me|walk me through|explain|describe|share (your|an?)|talk about|give me an example|how (did|do|would) you|what (is|are|was|were|do|does|did|would)|why (did|do|would|is|are)|can you|could you|please explain)\b/i;
+  /\b(tell me|walk me through|explain|describe|share (your|an?)|talk about|give me an example|how (did|do|would) you|what (is|are|was|were|do|does|did|would)|why (did|do|would|is|are)|can you|could you|please explain|introduce yourself|about yourself|your (project|experience|background))\b/i;
 
 const FILLER_ONLY =
-  /^(um+|uh+|hmm+|mm+|yeah|yep|yup|ok|okay|right|sure|thanks|thank you|hello|hi|hey|bye)\.?$/i;
+  /^(um+|uh+|hmm+|mm+|yeah|yep|yup|ok|okay|right|sure|thanks|thank you|hello|hi|hey|bye|let'?s move on|next question)\.?$/i;
 
 const INCOMPLETE_TAIL =
-  /\b(and|or|the|a|an|to|of|for|with|in|on|at|my|your|our|is|are|was|were|you|your|project|implemented)$/i;
+  /\b(and|or|but|the|a|an|to|of|for|with|in|on|at|my|your|our|from|into|using|via|through|by)$/i;
 
 function normalize(text: string) {
   return text
@@ -42,6 +52,12 @@ function normalize(text: string) {
     .replace(/[^\w\s?]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function questionIdFor(norm: string) {
+  let h = 0;
+  for (let i = 0; i < norm.length; i++) h = (h * 31 + norm.charCodeAt(i)) >>> 0;
+  return `q_${h.toString(16)}`;
 }
 
 function looksLikeQuestion(text: string): boolean {
@@ -52,13 +68,23 @@ function looksLikeQuestion(text: string): boolean {
   return false;
 }
 
-function isIncomplete(text: string): boolean {
+/**
+ * @param forStitch - when true (during assembly), wait longer for mid-sentence cuts.
+ *   When false (after stitch timeout / final eval), accept interviewer prompts even
+ *   without trailing "?" — Whisper rarely emits question marks.
+ */
+function isIncomplete(text: string, forStitch = true): boolean {
   const t = text.trim();
   if (t.endsWith("?")) return false;
-  if (t.length < 22 && !WH.test(t) && !INTERVIEW.test(t)) return true;
+  if (t.length < 24 && !WH.test(t) && !INTERVIEW.test(t)) return true;
   if (INCOMPLETE_TAIL.test(t) && !t.endsWith("?")) return true;
-  // Starts like a question but never reaches a clear close and is still short.
-  if ((WH.test(t) || INTERVIEW.test(t)) && t.length < 40 && !/[.!?]$/.test(t)) {
+  // During stitching only: short WH/INTERVIEW without punct may still be growing.
+  if (
+    forStitch &&
+    (WH.test(t) || INTERVIEW.test(t)) &&
+    t.length < 40 &&
+    !/[.!?]$/.test(t)
+  ) {
     return true;
   }
   return false;
@@ -75,21 +101,21 @@ function isDuplicate(norm: string, now: number): boolean {
   return false;
 }
 
-/** Append a finalized transcript line into the rolling conversation buffer. */
 export function pushRollingTranscript(who: string, text: string) {
   const cleaned = text.trim().slice(0, MAX_CHARS);
   if (!cleaned) return;
   rolling.push({ who, text: cleaned, at: Date.now() });
-  while (rolling.length > 24) rolling.shift();
+  while (rolling.length > 12) rolling.shift();
 }
 
-export function getRollingContext(limit = 8): { who: string; text: string }[] {
+export function getRollingContext(limit = 3): { who: string; text: string }[] {
   return rolling.slice(-limit).map(({ who, text }) => ({ who, text }));
 }
 
 export function clearQuestionMemory() {
   recent.length = 0;
   rolling.length = 0;
+  processingIds.clear();
   for (const key of Object.keys(pending)) {
     const bag = pending[key];
     if (bag?.timer) clearTimeout(bag.timer);
@@ -97,12 +123,29 @@ export function clearQuestionMemory() {
   }
 }
 
-/**
- * Decide whether a finalized transcript segment should trigger an AI answer.
- */
+export function beginQuestionProcessing(questionId: string): boolean {
+  if (processingIds.has(questionId)) return false;
+  processingIds.add(questionId);
+  return true;
+}
+
+export function endQuestionProcessing(questionId: string) {
+  processingIds.delete(questionId);
+}
+
+export function isFillerOnly(text: string): boolean {
+  return FILLER_ONLY.test(text.trim());
+}
+
 export function evaluateQuestion(
   text: string,
-  opts?: { who?: string; allowSelfQuestions?: boolean },
+  opts?: {
+    who?: string;
+    allowSelfQuestions?: boolean;
+    finalized?: boolean;
+    /** Accept interviewer speech that fails WH/INTERVIEW heuristics (System finals). */
+    forceSystem?: boolean;
+  },
 ): QuestionDecision {
   const raw = text.trim().replace(/\s+/g, " ").slice(0, MAX_CHARS);
   if (raw.length < MIN_CHARS) {
@@ -111,10 +154,12 @@ export function evaluateQuestion(
   if (FILLER_ONLY.test(raw)) {
     return { accept: false, question: raw, reason: "filler" };
   }
-  if (isIncomplete(raw)) {
+  // After stitch finalization, do not reject for missing "?" (Whisper rarely emits it).
+  const forStitch = opts?.finalized === true ? false : true;
+  if (isIncomplete(raw, forStitch) && !opts?.forceSystem) {
     return { accept: false, question: raw, reason: "incomplete" };
   }
-  if (!looksLikeQuestion(raw)) {
+  if (!looksLikeQuestion(raw) && !opts?.forceSystem) {
     return { accept: false, question: raw, reason: "not_question" };
   }
 
@@ -127,32 +172,34 @@ export function evaluateQuestion(
 
   const norm = normalize(raw);
   const now = Date.now();
-  if (isDuplicate(norm, now)) {
-    return { accept: false, question: raw, reason: "duplicate" };
+  const questionId = questionIdFor(norm);
+  if (isDuplicate(norm, now) || processingIds.has(questionId)) {
+    return { accept: false, question: raw, reason: "duplicate", questionId };
   }
 
-  recent.push({ norm, at: now });
+  recent.push({ norm, at: now, id: questionId });
   while (recent.length > MAX_RECENT) recent.shift();
 
-  return { accept: true, question: raw, reason: "ok" };
+  return { accept: true, question: raw, reason: "ok", questionId };
 }
 
 export type AssembledUtterance = {
   who: string;
   text: string;
-  /** True when the stitch window closed or the utterance looks complete. */
   finalized: boolean;
+  audioEndAt?: number;
+  transcribedAt?: number;
 };
 
 /**
- * Merge consecutive STT fragments from the same speaker so end-of-question
- * detection sees the full sentence ("…authentication in your project?") instead
- * of an early cut ("…how you implemented…").
+ * Merge consecutive STT fragments. Finalize immediately on clear `?` / complete
+ * questions; otherwise wait a short stitch window for the rest of the sentence.
  */
 export function assembleUtterance(
   who: string,
   text: string,
   onReady: (utterance: AssembledUtterance) => void,
+  timing?: { audioEndAt?: number; transcribedAt?: number; partial?: boolean },
 ): void {
   const cleaned = text.trim().replace(/\s+/g, " ");
   if (!cleaned) return;
@@ -160,13 +207,12 @@ export function assembleUtterance(
   const key = who || "Speaker";
   const now = Date.now();
   let bag = pending[key];
-  if (!bag || now - bag.updatedAt > STITCH_WINDOW_MS) {
+  if (!bag || now - bag.updatedAt > STITCH_WINDOW_MS + 400) {
     if (bag?.timer) clearTimeout(bag.timer);
     bag = { parts: [], updatedAt: now, timer: null };
     pending[key] = bag;
   }
 
-  // Avoid appending near-duplicate repeats from overlapping STT.
   const last = bag.parts[bag.parts.length - 1] || "";
   if (!last || normalize(cleaned) !== normalize(last)) {
     if (last && normalize(cleaned).startsWith(normalize(last)) && cleaned.length > last.length) {
@@ -176,24 +222,50 @@ export function assembleUtterance(
     }
   }
   bag.updatedAt = now;
+  if (timing?.audioEndAt != null) bag.audioEndAt = timing.audioEndAt;
+  if (timing?.transcribedAt != null) bag.transcribedAt = timing.transcribedAt;
 
   const joined = bag.parts.join(" ").replace(/\s+/g, " ").trim();
-  const complete = joined.endsWith("?") || (!isIncomplete(joined) && looksLikeQuestion(joined));
+  const complete =
+    joined.endsWith("?") ||
+    (!isIncomplete(joined, true) && looksLikeQuestion(joined) && /[.!]$/.test(joined));
 
   if (bag.timer) clearTimeout(bag.timer);
 
-  if (complete && joined.length >= MIN_CHARS) {
-    delete pending[key];
-    onReady({ who: key, text: joined, finalized: true });
+  // Partial mid-speech chunks only extend the bag — never fire AI yet.
+  if (timing?.partial) {
+    bag.timer = setTimeout(() => {
+      const current = pending[key];
+      if (!current) return;
+      const finalText = current.parts.join(" ").replace(/\s+/g, " ").trim();
+      const meta = {
+        audioEndAt: current.audioEndAt,
+        transcribedAt: current.transcribedAt,
+      };
+      delete pending[key];
+      if (finalText) {
+        onReady({ who: key, text: finalText, finalized: true, ...meta });
+      }
+    }, STITCH_WINDOW_MS);
     return;
   }
 
-  // Wait a short quiet gap for the rest of the sentence, then finalize.
+  if (complete && joined.length >= MIN_CHARS) {
+    const meta = { audioEndAt: bag.audioEndAt, transcribedAt: bag.transcribedAt };
+    delete pending[key];
+    onReady({ who: key, text: joined, finalized: true, ...meta });
+    return;
+  }
+
   bag.timer = setTimeout(() => {
     const current = pending[key];
     if (!current) return;
     const finalText = current.parts.join(" ").replace(/\s+/g, " ").trim();
+    const meta = {
+      audioEndAt: current.audioEndAt,
+      transcribedAt: current.transcribedAt,
+    };
     delete pending[key];
-    if (finalText) onReady({ who: key, text: finalText, finalized: true });
+    if (finalText) onReady({ who: key, text: finalText, finalized: true, ...meta });
   }, STITCH_WINDOW_MS);
 }

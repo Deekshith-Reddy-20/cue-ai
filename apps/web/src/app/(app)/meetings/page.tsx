@@ -2,12 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Video, Filter } from "lucide-react";
+import { Search, Trash2, Video, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { openCompanionOverlay } from "@/lib/desktop";
 import {
   formatDuration,
   formatMeetingWhen,
@@ -15,7 +14,7 @@ import {
 } from "@/lib/meetings-client";
 import { cn } from "@/lib/utils";
 
-type StatusFilter = "all" | "live" | "summary";
+type StatusFilter = "all" | "interview" | "regular";
 
 export default function MeetingsPage() {
   const [query, setQuery] = useState("");
@@ -23,16 +22,28 @@ export default function MeetingsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [meetings, setMeetings] = useState<StoredMeeting[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void fetch("/api/meetings", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data: { meetings?: StoredMeeting[] }) => {
-        if (active) setMeetings(data.meetings || []);
+      .then(async (r) => {
+        const data = (await r.json().catch(() => ({}))) as {
+          meetings?: StoredMeeting[];
+          error?: string;
+        };
+        if (!r.ok) throw new Error(data.error || "Unable to load meetings.");
+        if (active) {
+          setMeetings(data.meetings || []);
+          setError(null);
+        }
       })
-      .catch(() => {
-        if (active) setMeetings([]);
+      .catch((cause) => {
+        if (active) {
+          setMeetings([]);
+          setError(cause instanceof Error ? cause.message : "Unable to load meetings.");
+        }
       })
       .finally(() => {
         if (active) setLoaded(true);
@@ -45,18 +56,37 @@ export default function MeetingsPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return meetings.filter((m) => {
+      // Backend already excludes live; keep a hard client guard.
+      if (m.status === "live") return false;
       const matchesQuery =
         !q ||
         m.title.toLowerCase().includes(q) ||
         m.tags.some((t) => t.toLowerCase().includes(q)) ||
         (m.company || "").toLowerCase().includes(q);
-      const matchesStatus =
+      const matchesKind =
         statusFilter === "all" ||
-        (statusFilter === "live" && m.status === "live") ||
-        (statusFilter === "summary" && m.status !== "live");
-      return matchesQuery && matchesStatus;
+        (statusFilter === "interview" && m.kind === "interview") ||
+        (statusFilter === "regular" && m.kind === "regular");
+      return matchesQuery && matchesKind;
     });
   }, [meetings, query, statusFilter]);
+
+  async function handleDelete(meetingId: string) {
+    if (deletingId) return;
+    const ok = window.confirm("Delete this meeting permanently?");
+    if (!ok) return;
+    setDeletingId(meetingId);
+    try {
+      const res = await fetch(`/api/meetings/${encodeURIComponent(meetingId)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setMeetings((prev) => prev.filter((m) => m.id !== meetingId));
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 animate-fade-up">
@@ -66,7 +96,7 @@ export default function MeetingsPage() {
             Meetings
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Live sessions, recordings, and AI summaries in one place.
+            Completed sessions and AI summaries in one place.
           </p>
         </div>
         <Link href="/meetings/live">
@@ -100,8 +130,8 @@ export default function MeetingsPage() {
           {(
             [
               ["all", "All"],
-              ["live", "Live"],
-              ["summary", "Summary ready"],
+              ["interview", "Interview"],
+              ["regular", "Regular"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -121,53 +151,61 @@ export default function MeetingsPage() {
         </div>
       )}
 
+      {error && (
+        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          {error}
+        </p>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2">
         {filtered.map((m) => (
-          <Link
-            key={m.id}
-            href={
-              m.status === "live" && m.id.startsWith("mtg_")
-                ? "/meetings/live"
-                : `/meetings/${m.id}/summary`
-            }
-            onClick={() => {
-              if (m.status === "live" && m.id.startsWith("mtg_")) {
-                void openCompanionOverlay();
-              }
-            }}
-          >
-            <Card hover className="h-full p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--primary-muted)] text-primary">
-                  <Video className="h-5 w-5" />
-                </div>
-                {m.status === "live" ? (
-                  <Badge variant="success">Live</Badge>
-                ) : (
+          <div key={m.id} className="relative">
+            <Link href={`/meetings/${m.id}/summary`}>
+              <Card hover className="h-full p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--primary-muted)] text-primary">
+                    <Video className="h-5 w-5" />
+                  </div>
                   <Badge>Summary ready</Badge>
-                )}
-              </div>
-              <h3 className="mt-4 font-semibold tracking-tight">{m.title}</h3>
-              <p className="mt-1 text-sm text-muted">
-                {formatMeetingWhen(m.startedAt)} · {formatDuration(m.durationSec)}
-                {m.resumeName ? ` · ${m.resumeName}` : ""}
-              </p>
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                {m.tags.map((t) => (
-                  <Badge key={t} variant="info">
-                    {t}
-                  </Badge>
-                ))}
-              </div>
-            </Card>
-          </Link>
+                </div>
+                <h3 className="mt-4 font-semibold tracking-tight">{m.title}</h3>
+                <p className="mt-1 text-sm text-muted">
+                  {formatMeetingWhen(m.startedAt)} · {formatDuration(m.durationSec)}
+                  {m.resumeName ? ` · ${m.resumeName}` : ""}
+                  {Array.isArray(m.answers) && m.answers.length > 0
+                    ? ` · ${m.answers.length} Q&A`
+                    : ""}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                  {m.tags.map((t) => (
+                    <Badge key={t} variant="info">
+                      {t}
+                    </Badge>
+                  ))}
+                </div>
+              </Card>
+            </Link>
+            <button
+              type="button"
+              aria-label="Delete meeting"
+              disabled={deletingId === m.id}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void handleDelete(m.id);
+              }}
+              className="absolute bottom-4 right-4 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-muted transition hover:border-red-500/40 hover:text-red-400 disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         ))}
       </div>
 
-      {loaded && filtered.length === 0 && (
+      {loaded && !error && filtered.length === 0 && (
         <p className="py-8 text-center text-sm text-muted">
           {meetings.length === 0
-            ? "No sessions yet. Start a live session to save it here."
+            ? "No meetings yet."
             : `No meetings match your search${statusFilter !== "all" ? " or filters" : ""}.`}
         </p>
       )}

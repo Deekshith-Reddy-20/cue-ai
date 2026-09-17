@@ -10,7 +10,6 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/misc";
 import { fetchMeeting } from "@/lib/meetings-client";
 import type { MeetingRecord } from "@/lib/meetings-catalog";
-import { listMeetings } from "@/lib/meetings-catalog";
 import { cn } from "@/lib/utils";
 
 const languages = [
@@ -21,6 +20,10 @@ const languages = [
 
 type LangId = (typeof languages)[number]["id"];
 
+type MeetingListItem = {
+  id: string;
+  title: string;
+};
 function localizedLine(meeting: MeetingRecord, lang: LangId) {
   return meeting.transcript.map((line) => ({
     id: line.id,
@@ -62,6 +65,31 @@ function TranslationContent() {
   const [meeting, setMeeting] = useState<MeetingRecord | null>(null);
   const [loading, setLoading] = useState(Boolean(meetingId));
   const [error, setError] = useState<string | null>(null);
+  const [meetingList, setMeetingList] = useState<MeetingListItem[]>([]);
+  const [listLoaded, setListLoaded] = useState(false);
+
+  useEffect(() => {
+    if (meetingId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/meetings", { cache: "no-store" });
+        const data = (await res.json().catch(() => ({}))) as {
+          meetings?: MeetingListItem[];
+        };
+        if (!cancelled) {
+          setMeetingList(Array.isArray(data.meetings) ? data.meetings : []);
+        }
+      } catch {
+        if (!cancelled) setMeetingList([]);
+      } finally {
+        if (!cancelled) setListLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId]);
 
   useEffect(() => {
     if (!meetingId) {
@@ -113,7 +141,6 @@ function TranslationContent() {
   }
 
   if (!meetingId) {
-    const meetings = listMeetings();
     return (
       <div className="mx-auto max-w-5xl space-y-6 animate-fade-up">
         <div>
@@ -128,19 +155,25 @@ function TranslationContent() {
           <p className="mb-4 text-sm text-muted">
             No meeting is selected. Open Translation from a meeting summary, or pick a meeting below.
           </p>
-          <ul className="space-y-2">
-            {meetings.map((m) => (
-              <li key={m.id}>
-                <Link
-                  href={`/translation?meetingId=${encodeURIComponent(m.id)}`}
-                  className="flex items-center justify-between rounded-xl border border-[var(--border)] px-4 py-3 text-sm transition hover:border-teal-500/30 hover:bg-teal-500/5"
-                >
-                  <span className="font-medium">{m.title}</span>
-                  <span className="text-xs text-subtle">{m.id}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {!listLoaded ? (
+            <p className="text-sm text-muted">Loading meetings…</p>
+          ) : meetingList.length === 0 ? (
+            <p className="text-sm text-muted">No meetings yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {meetingList.map((m) => (
+                <li key={m.id}>
+                  <Link
+                    href={`/translation?meetingId=${encodeURIComponent(m.id)}`}
+                    className="flex items-center justify-between rounded-xl border border-[var(--border)] px-4 py-3 text-sm transition hover:border-teal-500/30 hover:bg-teal-500/5"
+                  >
+                    <span className="font-medium">{m.title}</span>
+                    <span className="text-xs text-subtle">{m.id}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </div>
     );
