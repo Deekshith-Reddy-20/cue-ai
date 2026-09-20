@@ -59,7 +59,7 @@ python main.py --model openai/gpt-4o-mini --runs 5
 
 ## Outputs
 
-Under `results/` (gitignored):
+Under `results/` (committed so reports can be shared; `.env` stays private):
 
 - `raw_results.csv` — one row per model/question/run
 - `model_summary.csv` — per-model aggregates

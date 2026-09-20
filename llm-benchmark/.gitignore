@@ -10,5 +10,4 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
-# Benchmark outputs (may contain model responses; never commit)
-results/
+# Keep local venv/cache ignored; results/ are committed for sharing reports

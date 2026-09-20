@@ -1,0 +1,27 @@
+timestamp,provider,model_name,model_id,question_id,category,question,run_number,request_start_time,first_token_time,completion_time,ttft_ms,ttft_seconds,total_latency_ms,total_latency_seconds,generation_time_ms,generation_time_seconds,input_tokens,output_tokens,total_tokens,tokens_per_second,complete_response,status,error_type,error_message,expected_answer,accuracy_label,accuracy_score,syntax_ok,logic_ok,correctness_ok,accuracy_notes,question_number,question_total
+2026-09-20T10:39:21.036882+00:00,OpenAI,GPT-4o mini,openai/gpt-4o-mini,Q01,REST_API,What is a REST API? Explain in 3 short points.,1,16:09:18.506,16:09:20.397,16:09:21.035,1891.509,1.891509,2421.832,2.421832,530.323,0.530323,56,88,144,165.94,"- **Architectural Style**: REST (Representational State Transfer) is an architectural style for designing networked applications.
+- **Stateless Communication**: Each API call from a client to a server must contain all the information needed to understand and process the request.
+- **Resource-Based**: Interactions are based on resources, identified by URLs, and use standard HTTP methods (GET, POST, PUT, DELETE) to perform operations.",SUCCESS,,,REST uses HTTP methods to operate on resources in a stateless way.,correct,1.0,,,True,keywords=5/5,1,1
+2026-09-20T10:39:22.250076+00:00,Google Gemini,Gemini 2.5 Flash Lite,google/gemini-2.5-flash-lite,Q01,REST_API,What is a REST API? Explain in 3 short points.,1,16:09:21.036,16:09:22.047,16:09:22.250,1011.335,1.011335,1210.805,1.210805,199.47,0.19947,45,48,93,240.64,"*   **REST** is an architectural style for designing networked applications.
+*   It uses standard HTTP methods (GET, POST, PUT, DELETE) for operations.
+*   Data is typically exchanged in formats like JSON or XML.",SUCCESS,,,REST uses HTTP methods to operate on resources in a stateless way.,partially_correct,0.4,,,False,keywords=2/5,1,1
+2026-09-20T10:39:24.059000+00:00,xAI Grok,Grok 4.20,x-ai/grok-4.20,Q01,REST_API,What is a REST API? Explain in 3 short points.,1,16:09:22.251,16:09:23.318,16:09:24.059,1068.16,1.06816,1805.248,1.805248,737.087,0.737087,232,76,308,103.11,"**REST API:**
+
+- **Representational State Transfer**: An architectural style for designing networked applications using HTTP protocols.
+- **Resource-based**: Uses standard HTTP methods (GET, POST, PUT, DELETE) to perform CRUD operations on resources identified by URLs.
+- **Stateless**: Each request from client to server contains all the information needed; the server doesn't store client context between requests.",SUCCESS,,,REST uses HTTP methods to operate on resources in a stateless way.,correct,1.0,,,True,keywords=5/5,1,1
+2026-09-20T10:39:28.178922+00:00,DeepSeek,DeepSeek Chat,deepseek/deepseek-chat,Q01,REST_API,What is a REST API? Explain in 3 short points.,1,16:09:24.060,16:09:25.025,16:09:28.178,965.901,0.965901,3969.176,3.969176,3003.275,3.003275,50,89,139,29.63,"- **Communication Protocol**: REST API is a standard for web services that uses HTTP requests to perform CRUD (Create, Read, Update, Delete) operations.  
+- **Stateless**: Each request is independent; the server doesn’t store any client context between requests.  
+- **Resource-Based**: Data is treated as resources, accessed via URLs (endpoints) and manipulated using HTTP methods (GET, POST, PUT, DELETE).",SUCCESS,,,REST uses HTTP methods to operate on resources in a stateless way.,correct,1.0,,,True,keywords=5/5,1,1
+2026-09-20T10:39:30.557965+00:00,Anthropic Claude,Claude Haiku 4.5,anthropic/claude-haiku-4.5,Q01,REST_API,What is a REST API? Explain in 3 short points.,1,16:09:28.178,16:09:29.789,16:09:30.557,1610.45,1.61045,2375.253,2.375253,764.803,0.764803,59,100,159,130.75,"# REST API in 3 Points
+
+1. **Architecture style for web services** — Uses standard HTTP methods (GET, POST, PUT, DELETE) to perform operations on resources identified by URLs.
+
+2. **Stateless communication** — Each request contains all needed information; the server doesn't store client context between requests.
+
+3. **Structured data exchange** — Typically returns data in JSON or XML format, making it easy for different applications to communicate.",SUCCESS,,,REST uses HTTP methods to operate on resources in a stateless way.,correct,1.0,,,True,keywords=5/5,1,1
+2026-09-20T10:39:32.997991+00:00,Perplexity,Sonar,perplexity/sonar,Q01,REST_API,What is a REST API? Explain in 3 short points.,1,16:09:30.557,16:09:32.095,16:09:32.997,1536.384,1.536384,2427.601,2.427601,891.217,0.891217,45,145,190,162.7,"A **REST API** is a way for software systems to communicate over HTTP using a set of design rules called **REST**.[1][4] It is commonly used to access and manage **resources** like users, products, or documents.[4][11]
+
+- It uses standard HTTP methods like **GET**, **POST**, **PUT**, and **DELETE** to read, create, update, or delete data.[3][11]
+- It is **stateless**, meaning each request is independent and does not rely on previous requests.[1][8]
+- It follows a **client-server** model, where the client sends requests and the server returns responses.[1][11]",SUCCESS,,,REST uses HTTP methods to operate on resources in a stateless way.,correct,1.0,,,True,keywords=5/5,1,1

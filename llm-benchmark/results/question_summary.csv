@@ -1,0 +1,7 @@
+question_id,category,question,provider,model_name,model_id,runs,success_rate,avg_ttft_ms,avg_total_latency_ms,avg_tokens_per_sec,accuracy
+Q01,REST_API,What is a REST API? Explain in 3 short points.,OpenAI,GPT-4o mini,openai/gpt-4o-mini,1,1.0,1891.509,2421.832,165.94,1.0
+Q01,REST_API,What is a REST API? Explain in 3 short points.,Google Gemini,Gemini 2.5 Flash Lite,google/gemini-2.5-flash-lite,1,1.0,1011.335,1210.805,240.64,0.4
+Q01,REST_API,What is a REST API? Explain in 3 short points.,xAI Grok,Grok 4.20,x-ai/grok-4.20,1,1.0,1068.16,1805.248,103.11,1.0
+Q01,REST_API,What is a REST API? Explain in 3 short points.,DeepSeek,DeepSeek Chat,deepseek/deepseek-chat,1,1.0,965.901,3969.176,29.63,1.0
+Q01,REST_API,What is a REST API? Explain in 3 short points.,Anthropic Claude,Claude Haiku 4.5,anthropic/claude-haiku-4.5,1,1.0,1610.45,2375.253,130.75,1.0
+Q01,REST_API,What is a REST API? Explain in 3 short points.,Perplexity,Sonar,perplexity/sonar,1,1.0,1536.384,2427.601,162.7,1.0
