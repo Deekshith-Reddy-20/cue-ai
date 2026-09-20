@@ -47,6 +47,10 @@ yarn-debug.log*
 **/.data/
 **/.data-e2e/
 
+# LLM benchmark secrets & outputs
+llm-benchmark/.env
+llm-benchmark/results/
+
 # ngrok local agent secrets (authtoken)
 ngrok.yml.local
 **/ngrok.yml.local
