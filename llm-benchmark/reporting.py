@@ -175,7 +175,7 @@ def generate_charts(
 
     # CueAI realtime subset charts
     if not raw.empty and "category" in raw.columns:
-        cue = raw[raw["category"] == "CUEAI_REALTIME"]
+        cue = raw[raw["category"] == "REALTIME_INTERVIEW"]
         if not cue.empty:
             rows = []
             for keys, g in cue.groupby(["provider", "model_name"], sort=False):
@@ -357,12 +357,12 @@ def save_excel_report(
 
     # 6. CueAI Real-Time Results
     cue_raw = (
-        raw[raw["category"] == "CUEAI_REALTIME"].copy()
+        raw[raw["category"] == "REALTIME_INTERVIEW"].copy()
         if not raw.empty and "category" in raw.columns
         else pd.DataFrame()
     )
     cue_q = (
-        question_summary[question_summary["category"] == "CUEAI_REALTIME"].copy()
+        question_summary[question_summary["category"] == "REALTIME_INTERVIEW"].copy()
         if not question_summary.empty and "category" in question_summary.columns
         else pd.DataFrame()
     )

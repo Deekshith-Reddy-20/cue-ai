@@ -16,19 +16,41 @@ def _keyword_hits(response: str, keywords: tuple[str, ...]) -> tuple[int, int]:
     body = _norm(response)
     if not keywords:
         return 0, 0
-    hits = 0
-    for kw in keywords:
-        needle = kw.lower()
-        if needle in body:
-            hits += 1
+    hits = sum(1 for kw in keywords if kw.lower() in body)
     return hits, len(keywords)
+
+
+def _has_accepted_answer(response: str, accepted: tuple[str, ...], expected: str) -> bool:
+    body = _norm(response)
+    compact = body.replace(",", "")
+    candidates = list(accepted)
+    if expected:
+        candidates.append(expected)
+    for ans in candidates:
+        token = _norm(ans)
+        if not token:
+            continue
+        if token in body or token in compact:
+            return True
+        # numeric exact token boundary
+        if re.fullmatch(r"-?\d+(?:\.\d+)?%?", token):
+            if re.search(rf"(?<![\d.]){re.escape(token)}(?![\d.])", compact):
+                return True
+    return False
+
+
+def _label_from_score(score: float) -> str:
+    if score >= 0.7:
+        return "correct"
+    if score >= 0.35:
+        return "partially_correct"
+    return "incorrect"
 
 
 def evaluate_response(prompt: PromptCase, response: str) -> dict[str, Any]:
     """
     Returns accuracy fields. Does not invent timing.
-    accuracy_label: correct | partially_correct | incorrect | not_evaluated | failed
-    accuracy_score: 0.0–1.0 or None
+    For coding/debugging also sets syntax_ok / logic_ok / correctness_ok.
     """
     text = (response or "").strip()
     if not text:
@@ -43,53 +65,120 @@ def evaluate_response(prompt: PromptCase, response: str) -> dict[str, Any]:
 
     hits, total = _keyword_hits(text, prompt.expected_keywords)
     ratio = (hits / total) if total else None
+    body = _norm(text)
 
     syntax_ok: Optional[bool] = None
     logic_ok: Optional[bool] = None
     correctness_ok: Optional[bool] = None
-    notes_parts: list[str] = []
+    notes: list[str] = []
+    score = 0.0
+    label = "incorrect"
 
-    if prompt.eval_type == "coding":
-        body = _norm(text)
-        checks = prompt.coding_checks or ("def",)
-        check_hits = sum(1 for c in checks if c.lower() in body)
-        syntax_ok = check_hits >= max(1, len(checks) // 2)
-        # Logic heuristic: enough conceptual keywords + coding checks
-        logic_ok = (ratio is not None and ratio >= 0.4) or check_hits >= 2
-        if ratio is None:
-            correctness_ok = bool(syntax_ok and logic_ok)
-            score = 1.0 if correctness_ok else (0.5 if syntax_ok else 0.0)
-        else:
-            score = min(1.0, 0.5 * (check_hits / max(1, len(checks))) + 0.5 * ratio)
-            correctness_ok = score >= 0.7
-        if score >= 0.7:
+    if prompt.eval_type in {"aptitude", "logical"}:
+        exact = _has_accepted_answer(
+            text, prompt.accepted_answers, prompt.expected_answer
+        )
+        if exact:
+            score = 1.0
             label = "correct"
-        elif score >= 0.35:
+            correctness_ok = True
+            notes.append("verified_answer_match")
+        elif ratio is not None and ratio >= 0.5:
+            score = 0.5
             label = "partially_correct"
+            correctness_ok = False
+            notes.append(f"keywords={hits}/{total}; no exact answer match")
         else:
+            score = float(ratio or 0.0) * 0.3
             label = "incorrect"
-        notes_parts.append(f"coding_checks={check_hits}/{len(checks)}")
-        if total:
-            notes_parts.append(f"keywords={hits}/{total}")
+            correctness_ok = False
+            notes.append("expected_answer_missing")
+
+    elif prompt.eval_type == "coding":
+        checks = prompt.coding_checks or ("def", "return")
+        check_hits = sum(1 for c in checks if c.lower() in body)
+        has_def = "def " in body or body.startswith("def")
+        has_complexity = "o(" in body or "o(n" in body or "log" in body
+        syntax_ok = has_def and check_hits >= max(1, len(checks) // 2)
+        logic_ok = (ratio is not None and ratio >= 0.35) or check_hits >= 2
+        edge = any(k in body for k in ("edge", "empty", "none", "n <", "n<="))
+        score = 0.0
+        score += 0.35 * (check_hits / max(1, len(checks)))
+        score += 0.35 * (ratio or 0.0)
+        score += 0.15 if has_complexity else 0.0
+        score += 0.15 if edge else 0.0
+        score = min(1.0, score)
+        label = _label_from_score(score)
+        correctness_ok = label == "correct"
+        notes.append(
+            f"coding_checks={check_hits}/{len(checks)}; complexity={has_complexity}; edge={edge}"
+        )
+
+    elif prompt.eval_type == "debugging":
+        checks = prompt.coding_checks or ()
+        check_hits = sum(1 for c in checks if c.lower() in body)
+        explains = any(
+            k in body
+            for k in ("error", "bug", "fix", "because", "cause", "issue")
+        )
+        has_fix_code = "def " in body or "for " in body or "while " in body or ":" in text
+        syntax_ok = explains or check_hits > 0
+        logic_ok = check_hits >= max(1, len(checks) // 2) if checks else explains
+        score = 0.0
+        score += 0.45 * ((check_hits / max(1, len(checks))) if checks else (1.0 if explains else 0.0))
+        score += 0.35 * (ratio or 0.0)
+        score += 0.20 if has_fix_code else 0.0
+        score = min(1.0, score)
+        label = _label_from_score(score)
+        correctness_ok = label == "correct"
+        notes.append(f"debug_checks={check_hits}/{len(checks) if checks else 0}")
+
     elif prompt.eval_type == "sql":
-        body = _norm(text)
         has_select = "select" in body
         syntax_ok = has_select
-        if ratio is None:
-            score = 1.0 if has_select else 0.0
-        else:
-            score = (0.4 if has_select else 0.0) + 0.6 * ratio
+        score = (0.4 if has_select else 0.0) + 0.6 * (ratio or 0.0)
         logic_ok = score >= 0.5
-        correctness_ok = score >= 0.7
-        label = (
-            "correct"
-            if score >= 0.7
-            else ("partially_correct" if score >= 0.35 else "incorrect")
-        )
-        if total:
-            notes_parts.append(f"keywords={hits}/{total}")
-    else:
+        label = _label_from_score(score)
+        correctness_ok = label == "correct"
+        notes.append(f"keywords={hits}/{total}; select={has_select}")
+
+    elif prompt.eval_type == "behavioral":
         if total == 0:
+            score = 0.6 if len(text.split()) >= 20 else 0.3
+        else:
+            score = ratio or 0.0
+        # Prefer substance over buzzwords alone
+        if len(text.split()) >= 25:
+            score = min(1.0, score + 0.15)
+        label = _label_from_score(score)
+        correctness_ok = label == "correct"
+        notes.append(f"keywords={hits}/{total}; words={len(text.split())}")
+
+    else:
+        # conceptual / factual
+        if prompt.accepted_answers or (
+            prompt.expected_answer
+            and prompt.eval_type == "factual"
+            and re.search(r"\d", prompt.expected_answer)
+        ):
+            if _has_accepted_answer(
+                text, prompt.accepted_answers, prompt.expected_answer
+            ):
+                score = 1.0
+                label = "correct"
+                correctness_ok = True
+                notes.append("verified_answer_match")
+            elif total:
+                score = ratio or 0.0
+                label = _label_from_score(score)
+                correctness_ok = label == "correct"
+                notes.append(f"keywords={hits}/{total}")
+            else:
+                score = 0.0
+                label = "incorrect"
+                correctness_ok = False
+                notes.append("expected_answer_missing")
+        elif total == 0:
             return {
                 "accuracy_label": "not_evaluated",
                 "accuracy_score": None,
@@ -98,32 +187,19 @@ def evaluate_response(prompt: PromptCase, response: str) -> dict[str, Any]:
                 "correctness_ok": None,
                 "accuracy_notes": "No expected keywords configured",
             }
-        score = ratio if ratio is not None else 0.0
-        if score >= 0.7:
-            label = "correct"
-        elif score >= 0.35:
-            label = "partially_correct"
         else:
-            label = "incorrect"
-        correctness_ok = label == "correct"
-        notes_parts.append(f"keywords={hits}/{total}")
-
-    # Hard factual override for known numeric answers
-    if prompt.expected_answer and prompt.eval_type == "factual":
-        expected_num = re.search(r"\b(\d+(?:\.\d+)?)\b", prompt.expected_answer)
-        if expected_num and expected_num.group(1) in text.replace(",", ""):
-            label = "correct"
-            score = max(score or 0.0, 1.0)
-            correctness_ok = True
-            notes_parts.append("expected_value_found")
+            score = ratio or 0.0
+            label = _label_from_score(score)
+            correctness_ok = label == "correct"
+            notes.append(f"keywords={hits}/{total}")
 
     return {
         "accuracy_label": label,
-        "accuracy_score": round(float(score), 4) if score is not None else None,
+        "accuracy_score": round(float(score), 4),
         "syntax_ok": syntax_ok,
         "logic_ok": logic_ok,
         "correctness_ok": correctness_ok,
-        "accuracy_notes": "; ".join(notes_parts),
+        "accuracy_notes": "; ".join(notes),
     }
 
 

@@ -1,8 +1,25 @@
 # CueAI OpenRouter LLM Benchmark
 
-Real-world **speed + response** benchmark. Every configured model receives the **exact same questions**. Streaming measures TTFT, total latency, generation speed, and accuracy.
+Real-world **speed + response** benchmark for CueAI. Every configured model receives the **exact same questions in the exact same order**.
 
 **Never commit `.env` or paste your API key into source, logs, CSV, or Excel.**
+
+## Question bank
+
+75 questions across 12 categories (at least 5 each):
+
+1. TECHNICAL
+2. APTITUDE (verified expected answers)
+3. LOGICAL_REASONING
+4. CODING
+5. DEBUGGING
+6. SQL_DATABASE
+7. COMPUTER_SCIENCE
+8. SCENARIO
+9. REALTIME_INTERVIEW (CueAI short / live)
+10. BEHAVIORAL_HR
+11. SHORT_ANSWER
+12. FOLLOW_UP
 
 ## Prerequisites
 
@@ -19,56 +36,27 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Ensure `.env` contains:
-
-```
-OPENROUTER_API_KEY=your_key_here
-```
-
 ## Commands
-
-Quick smoke test (1 question x 1 run per model):
 
 ```powershell
 python main.py --quick
-```
-
-Full benchmark (all questions x N runs):
-
-```powershell
+python main.py --runs 1
 python main.py --runs 5
-```
-
-10-run benchmark:
-
-```powershell
-python main.py --runs 10
-```
-
-CueAI real-time only:
-
-```powershell
 python main.py --cueai --runs 5
-```
-
-Single model:
-
-```powershell
 python main.py --model openai/gpt-4o-mini --runs 5
 ```
 
 ## Outputs
 
-Under `results/` (committed so reports can be shared; `.env` stays private):
+Under `results/`:
 
 - `raw_results.csv` — one row per model/question/run
 - `model_summary.csv` — per-model aggregates
-- `question_summary.csv` — per-question x model aggregates
-- `LLM_Benchmark_Report.xlsx` — Executive Summary, Model Summary, Question Comparison, Speed, Accuracy, CueAI Real-Time, Raw Results, Errors (+ charts)
+- `question_summary.csv` — per-question × model aggregates
+- `LLM_Benchmark_Report.xlsx` — full report + charts
 
 ## Notes
 
-- Models are configured only in `config.py`
-- Accuracy is evaluated separately from latency (SUCCESS ≠ correct)
-- Timings use `time.perf_counter()` on real streamed responses
-- Timeout / retries: `REQUEST_TIMEOUT_SEC`, `MAX_RETRIES` in `config.py`
+- Models only in `config.py` (do not invent IDs)
+- Accuracy is separate from latency (SUCCESS ≠ correct)
+- Streaming TTFT uses `time.perf_counter()`

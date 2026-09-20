@@ -96,6 +96,15 @@ def verify_api_key(api_key: str) -> tuple[bool, str]:
         return False, f"Auth check failed: {type(exc).__name__}"
 
 
+def _safe_print(text: str) -> None:
+    """Print without crashing on Windows charmap consoles."""
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(text.encode(enc, errors="replace").decode(enc, errors="replace"), flush=True)
+
+
 def print_live(result, *, runs: int) -> None:
     q_short = result.question.replace("\n", " ")
     if len(q_short) > 90:
@@ -119,7 +128,7 @@ def print_live(result, *, runs: int) -> None:
         str(result.output_tokens) if result.output_tokens is not None else "-"
     )
 
-    print(
+    _safe_print(
         "\n"
         + "=" * 40
         + "\n"
@@ -139,8 +148,7 @@ def print_live(result, *, runs: int) -> None:
         f"Generation speed:\n{tps}\n\n"
         f"Accuracy:\n{result.accuracy_label or '-'}\n\n"
         f"Status:\n{status}\n\n"
-        + "=" * 40,
-        flush=True,
+        + "=" * 40
     )
 
 
@@ -214,7 +222,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                     # Patch run denominator into live print via question_total already set
                     results.append(result.to_row())
-                    print_live(result, runs=runs)
+                    try:
+                        print_live(result, runs=runs)
+                    except Exception as print_exc:  # noqa: BLE001
+                        print(
+                            f"(progress print failed: {type(print_exc).__name__}) "
+                            f"{result.question_id} run {run_number} status={result.status}",
+                            flush=True,
+                        )
 
                     if result.error_type == "invalid_api_key":
                         auth_failed = True
