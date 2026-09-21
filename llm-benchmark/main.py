@@ -27,11 +27,12 @@ from config import (
     enabled_models,
     find_model,
 )
-from metrics import summarize_models, summarize_questions
-from prompts import select_prompts
+from metrics import summarize_categories, summarize_models, summarize_questions
+from prompts import category_counts, select_prompts, validate_question_bank
 from reporting import (
     generate_charts,
     print_final_comparison,
+    save_category_summary_csv,
     save_excel_report,
     save_model_summary_csv,
     save_question_summary_csv,
@@ -65,6 +66,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--cueai",
         action="store_true",
         help="Run only CueAI real-time short questions",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print the shared question bank and exit (no API calls)",
     )
     return parser.parse_args(argv)
 
@@ -186,6 +192,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not models:
         print("ERROR: No models enabled in config.py", file=sys.stderr)
         return 2
+
+    try:
+        validate_question_bank()
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    if args.list:
+        counts = category_counts()
+        print(f"Shared question bank: {sum(counts.values())} questions")
+        for cat, n in counts.items():
+            print(f"  {cat}: {n}")
+        prompts = select_prompts(cueai_only=args.cueai, quick=False)
+        for p in prompts:
+            print(f"{p.id}\t{p.category}\t{p.eval_type}")
+        return 0
 
     prompts = select_prompts(cueai_only=args.cueai, quick=args.quick)
     runs = RUNS_PER_PROMPT if args.runs is None else max(1, args.runs)

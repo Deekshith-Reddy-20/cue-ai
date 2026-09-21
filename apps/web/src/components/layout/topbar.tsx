@@ -25,18 +25,14 @@ import { toggleCompanionOverlay } from "@/lib/desktop";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-const INITIAL_NOTIFS = [
-  { id: "n1", text: "Welcome to CueAI — your workspace is ready", href: "/dashboard" },
-  { id: "n2", text: "Try starting a live meeting session", href: "/meetings/live" },
-  { id: "n3", text: "Upload docs to your Knowledge Base", href: "/knowledge" },
-];
-
 const COMMAND_LINKS = [
   { label: "Start live meeting", href: "/meetings/live", icon: Video },
   { label: "Meetings", href: "/meetings", icon: FileText },
   { label: "Knowledge Base", href: "/knowledge", icon: BookOpen },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
+
+type NotifItem = { id: string; text: string; href: string };
 
 export function Topbar() {
   const { theme, toggleTheme } = useTheme();
@@ -47,11 +43,13 @@ export function Topbar() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
-  const [notifs, setNotifs] = useState(INITIAL_NOTIFS);
+  // No seeded/fake notifications — only real items if added later.
+  const [notifs, setNotifs] = useState<NotifItem[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
   // Avoid SSR/client mismatch: cueDesktop / bridge only exist after mount.
   const [desktopReady, setDesktopReady] = useState(false);
   const commandInputRef = useRef<HTMLInputElement>(null);
+  const menuRootRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,14 +64,39 @@ export function Topbar() {
   }, []);
 
   useEffect(() => {
-    if (!commandOpen) return;
-    commandInputRef.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setCommandOpen(false);
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        closeMenus();
+        setCommandOpen(true);
+        setCommandQuery("");
+        return;
+      }
+      if (e.key === "Escape") {
+        setCommandOpen(false);
+        closeMenus();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    if (!commandOpen) return;
+    commandInputRef.current?.focus();
   }, [commandOpen]);
+
+  useEffect(() => {
+    if (!notifOpen && !profileOpen && !workspaceOpen) return;
+    function onPointerDown(e: MouseEvent) {
+      const root = menuRootRef.current;
+      if (root && !root.contains(e.target as Node)) {
+        closeMenus();
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [notifOpen, profileOpen, workspaceOpen]);
 
   const displayName = session?.name || "Guest";
   const workspace = session?.workspace || "CueAI";
@@ -105,7 +128,10 @@ export function Topbar() {
   }
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[var(--border)] bg-[var(--background)]/80 px-4 backdrop-blur-xl sm:px-6">
+    <header
+      ref={menuRootRef}
+      className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[var(--border)] bg-[var(--background)]/80 px-4 backdrop-blur-xl sm:px-6"
+    >
       <div className="relative hidden md:block">
         <button
           type="button"
@@ -227,7 +253,9 @@ export function Topbar() {
                 )}
               </div>
               {notifs.length === 0 ? (
-                <p className="px-3 py-4 text-center text-sm text-muted">You&apos;re all caught up</p>
+                <p className="px-3 py-4 text-center text-sm text-muted">
+                  No notifications yet.
+                </p>
               ) : (
                 notifs.map((n) => (
                   <button

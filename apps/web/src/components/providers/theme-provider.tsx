@@ -23,14 +23,24 @@ const ThemeContext = createContext<ThemeContextValue>({
   toggleTheme: () => {},
 });
 
+function readStoredTheme(): Theme {
+  if (typeof window === "undefined") return "dark";
+  const stored = localStorage.getItem("cueai-theme");
+  return stored === "light" || stored === "dark" ? stored : "dark";
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("dark");
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem("cueai-theme") as Theme | null;
-    const initial = stored === "light" || stored === "dark" ? stored : "dark";
-    setThemeState(initial);
+    const initial = readStoredTheme();
+    // Sync DOM attribute first; state update is intentional after mount for hydration safety.
     document.documentElement.setAttribute("data-theme", initial);
+    queueMicrotask(() => {
+      setThemeState(initial);
+      setHydrated(true);
+    });
   }, []);
 
   const setTheme = useCallback((next: Theme) => {
@@ -44,7 +54,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [setTheme, theme]);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme: hydrated ? theme : "dark", setTheme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

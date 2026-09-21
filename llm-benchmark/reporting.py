@@ -16,6 +16,7 @@ from openpyxl.styles import Alignment, Font  # noqa: E402
 from openpyxl.utils.dataframe import dataframe_to_rows  # noqa: E402
 
 from config import (
+    CATEGORY_SUMMARY_CSV,
     CHART_ACCURACY,
     CHART_AVG_LATENCY,
     CHART_AVG_TTFT,
@@ -54,6 +55,14 @@ def save_model_summary_csv(df: pd.DataFrame, path: Path = MODEL_SUMMARY_CSV) -> 
 
 def save_question_summary_csv(
     df: pd.DataFrame, path: Path = QUESTION_SUMMARY_CSV
+) -> Path:
+    ensure_results_dir()
+    df.to_csv(path, index=False)
+    return path
+
+
+def save_category_summary_csv(
+    df: pd.DataFrame, path: Path = CATEGORY_SUMMARY_CSV
 ) -> Path:
     ensure_results_dir()
     df.to_csv(path, index=False)
@@ -266,6 +275,7 @@ def save_excel_report(
     question_summary: pd.DataFrame,
     chart_paths: dict[str, Optional[Path]],
     path: Path = EXCEL_PATH,
+    category_summary: Optional[pd.DataFrame] = None,
 ) -> Path:
     ensure_results_dir()
     wb = Workbook()
@@ -306,6 +316,13 @@ def save_excel_report(
     # 3. Question Comparison
     ws_qc = wb.create_sheet()
     _write_df_sheet(ws_qc, question_summary, "Question Comparison")
+
+    ws_cat = wb.create_sheet()
+    _write_df_sheet(
+        ws_cat,
+        category_summary if category_summary is not None else pd.DataFrame(),
+        "Category Summary",
+    )
 
     # 4. Speed Results
     speed_cols = [

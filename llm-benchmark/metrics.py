@@ -144,6 +144,43 @@ def summarize_questions(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def summarize_categories(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for keys, group in df.groupby(["category", "provider", "model_name", "model_id"], sort=False):
+        category, provider, model_name, model_id = keys
+        ok = group[group["status"] == "SUCCESS"]
+        ttfts = [float(x) for x in ok["ttft_ms"].dropna().tolist()]
+        totals = [float(x) for x in ok["total_latency_ms"].dropna().tolist()]
+        acc_scores: list[float] = []
+        for _, r in ok.iterrows():
+            v = accuracy_numeric(
+                str(r.get("accuracy_label") or ""),
+                r.get("accuracy_score") if pd.notna(r.get("accuracy_score")) else None,
+            )
+            if v is not None:
+                acc_scores.append(v)
+        n_total = int(len(group))
+        n_ok = int(len(ok))
+        rows.append(
+            {
+                "category": category,
+                "provider": provider,
+                "model_name": model_name,
+                "model_id": model_id,
+                "questions": int(group["question_id"].nunique()) if "question_id" in group else n_total,
+                "requests": n_total,
+                "success_rate": _round((n_ok / n_total) if n_total else 0.0, 4),
+                "avg_ttft_ms": _round(_mean(ttfts)),
+                "avg_total_latency_ms": _round(_mean(totals)),
+                "accuracy": _round(_mean(acc_scores), 4),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 # Back-compat name used by older main
 def summarize_results(df: pd.DataFrame) -> pd.DataFrame:
     return summarize_models(df)

@@ -18,6 +18,7 @@ RESULTS_DIR = ROOT / "results"
 RAW_CSV = RESULTS_DIR / "raw_results.csv"
 MODEL_SUMMARY_CSV = RESULTS_DIR / "model_summary.csv"
 QUESTION_SUMMARY_CSV = RESULTS_DIR / "question_summary.csv"
+CATEGORY_SUMMARY_CSV = RESULTS_DIR / "category_summary.csv"
 EXCEL_PATH = RESULTS_DIR / "LLM_Benchmark_Report.xlsx"
 
 # Charts
@@ -47,10 +48,11 @@ OPENROUTER_APP_TITLE = "CueAI LLM Benchmark"
 # Run settings (override via CLI: --runs / --quick / --cueai)
 # ---------------------------------------------------------------------------
 
-RUNS_PER_PROMPT = 5
-MAX_TOKENS = 220  # keep outputs reasonably short for latency focus
+RUNS_PER_PROMPT = 1
+MAX_TOKENS = 280  # CueAI-style brevity for conceptual / short answers
+MAX_TOKENS_CODE = 700  # coding / debugging / SQL need a function + complexity
 TEMPERATURE = 0.2
-REQUEST_TIMEOUT_SEC = 60.0
+REQUEST_TIMEOUT_SEC = 90.0
 MAX_RETRIES = 3
 RETRY_BACKOFF_SEC = 1.5
 

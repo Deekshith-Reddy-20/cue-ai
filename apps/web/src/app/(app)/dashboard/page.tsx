@@ -241,7 +241,7 @@ export default function DashboardPage() {
         >
           <div>
             <h2 className="db-section-title">Resource usage</h2>
-            <p className="db-section-sub">Plan capacity this cycle</p>
+            <p className="db-section-sub">Usage meters (zeros until billing/usage APIs connect)</p>
           </div>
           <div className="space-y-5">
             <div>

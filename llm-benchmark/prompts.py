@@ -698,7 +698,75 @@ PROMPTS: list[PromptCase] = [
         keywords=("polymorphism", "inherit", "behavior", "reuse", "interface"),
         expected="Inheritance reuses structure; polymorphism varies behavior via shared interface.",
     ),
+    # Extra coverage (same shared order for every model)
+    _q(
+        76,
+        "LOGICAL_REASONING",
+        "A, B and C sit in a single row. B is in the middle. A is not at the right end. "
+        "Who sits at the right end? One word.",
+        keywords=("c",),
+        expected="C",
+        eval_type="logical",
+        accepted=("c", "person c", "c sits"),
+    ),
+    _q(
+        77,
+        "DEBUGGING",
+        "Find the bug:\n"
+        "```python\ndef append_item(item, bucket=[]):\n"
+        "    bucket.append(item)\n"
+        "    return bucket\n"
+        "print(append_item(1))\n"
+        "print(append_item(2))\n"
+        "```\n"
+        "Explain the unexpected output and give a correct default.",
+        keywords=("mutable", "default", "none", "list"),
+        expected="Mutable default list is shared. Use bucket=None then bucket = bucket or [].",
+        eval_type="debugging",
+        coding_checks=("mutable", "none", "default"),
+    ),
+    _q(
+        78,
+        "APTITUDE",
+        "Simple interest on Rs.2000 at 10% per year for 2 years is how many rupees? Number only.",
+        keywords=("400",),
+        expected="400",
+        eval_type="aptitude",
+        accepted=("400", "rs 400", "rs.400"),
+    ),
+    _q(
+        79,
+        "SQL_DATABASE",
+        "Write SQL to count employees per department from employees(dept, name).",
+        keywords=("select", "count", "group by", "dept"),
+        expected="SELECT dept, COUNT(*) FROM employees GROUP BY dept;",
+        eval_type="sql",
+        coding_checks=("select", "group by", "count"),
+    ),
+    _q(
+        80,
+        "TECHNICAL",
+        "What is the CAP theorem in distributed systems?",
+        keywords=("consistency", "availability", "partition", "cap"),
+        expected="A distributed system can fully guarantee only two of Consistency, Availability, Partition tolerance.",
+    ),
 ]
+
+
+REQUIRED_CATEGORIES = (
+    "TECHNICAL",
+    "APTITUDE",
+    "LOGICAL_REASONING",
+    "CODING",
+    "DEBUGGING",
+    "SQL_DATABASE",
+    "COMPUTER_SCIENCE",
+    "SCENARIO",
+    "REALTIME_INTERVIEW",
+    "BEHAVIORAL_HR",
+    "SHORT_ANSWER",
+    "FOLLOW_UP",
+)
 
 
 # CueAI realtime subset (short questions) — same order subset for --cueai
@@ -719,3 +787,24 @@ def category_counts() -> dict[str, int]:
     for p in PROMPTS:
         counts[p.category] = counts.get(p.category, 0) + 1
     return counts
+
+
+def validate_question_bank(min_total: int = 60, min_per_category: int = 5) -> None:
+    """Fail fast if the shared bank is too small or reordered IDs collide."""
+    counts = category_counts()
+    missing = [c for c in REQUIRED_CATEGORIES if counts.get(c, 0) < min_per_category]
+    if missing:
+        raise ValueError(
+            "Question bank is short in: "
+            + ", ".join(f"{c}={counts.get(c, 0)}" for c in missing)
+        )
+    if len(PROMPTS) < min_total:
+        raise ValueError(f"Need at least {min_total} questions, found {len(PROMPTS)}")
+    ids = [p.id for p in PROMPTS]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Duplicate question IDs in PROMPTS")
+    for p in PROMPTS:
+        if p.eval_type in {"aptitude", "logical"} and not (
+            p.expected_answer or p.accepted_answers
+        ):
+            raise ValueError(f"{p.id} ({p.category}) needs a verified expected answer")

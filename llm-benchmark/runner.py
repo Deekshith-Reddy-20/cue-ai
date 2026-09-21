@@ -21,12 +21,19 @@ from accuracy import evaluate_response
 from config import (
     MAX_RETRIES,
     MAX_TOKENS,
+    MAX_TOKENS_CODE,
     RETRY_BACKOFF_SEC,
     SYSTEM_PROMPT,
     TEMPERATURE,
     ModelConfig,
 )
 from prompts import PromptCase
+
+
+def _max_tokens_for(prompt: PromptCase) -> int:
+    if prompt.eval_type in {"coding", "debugging", "sql"}:
+        return MAX_TOKENS_CODE
+    return MAX_TOKENS
 
 
 @dataclass
@@ -142,7 +149,7 @@ def _stream_once(
             {"role": "user", "content": prompt.text},
         ],
         temperature=TEMPERATURE,
-        max_tokens=MAX_TOKENS,
+        max_tokens=_max_tokens_for(prompt),
         stream=True,
         stream_options={"include_usage": True},
     )

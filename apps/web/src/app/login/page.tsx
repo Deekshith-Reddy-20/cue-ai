@@ -6,7 +6,7 @@ import { Suspense, useEffect, useState, type FormEvent, type ReactNode } from "r
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, Lock, ArrowRight, Sparkles, Shield } from "lucide-react";
+import { Mail, Lock, ArrowRight, Sparkles, Shield, Eye, EyeOff } from "lucide-react";
 import { loginWithEmailApi, AUTH_BYPASS } from "@/lib/auth";
 import { CREDENTIALS_BYPASS } from "@/lib/auth-mode";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -65,6 +65,8 @@ function LoginForm() {
   const { refresh } = useAuth();
   const [loading, setLoading] = useState<"user" | "admin" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
   useEffect(() => {
     if (AUTH_BYPASS) {
@@ -118,6 +120,12 @@ function LoginForm() {
 
     // Await so the app gate sees the fresh session before we navigate.
     await refresh();
+
+    if (rememberMe) {
+      localStorage.setItem("cueai-remember-email", String(data.get("email") || ""));
+    } else {
+      localStorage.removeItem("cueai-remember-email");
+    }
 
     if (destination === "admin") {
       if (!canAccessAdmin(result.session.role)) {
@@ -173,11 +181,21 @@ function LoginForm() {
         />
         <Input
           label="Password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           name="password"
           placeholder={CREDENTIALS_BYPASS ? "Optional while testing" : "••••••••"}
           autoComplete="current-password"
           leftIcon={<Lock className="h-4 w-4" />}
+          rightIcon={
+            <button
+              type="button"
+              className="text-subtle transition hover:text-foreground"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          }
           required={!CREDENTIALS_BYPASS}
         />
         {CREDENTIALS_BYPASS && (
@@ -188,7 +206,12 @@ function LoginForm() {
         )}
         <div className="flex items-center justify-between text-sm">
           <label className="flex items-center gap-2 text-muted">
-            <input type="checkbox" className="rounded border-[var(--border-strong)]" />
+            <input
+              type="checkbox"
+              className="rounded border-[var(--border-strong)]"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+            />
             Remember me
           </label>
           <Link href="/forgot-password" className="text-primary hover:underline">

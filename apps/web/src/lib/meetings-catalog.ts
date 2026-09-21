@@ -68,9 +68,11 @@ export function listMeetings(): MeetingListItem[] {
 
 /** @deprecated Demo catalog removed — always null. Use /api/meetings/[id]. */
 export function getMeetingById(_id: string): MeetingRecord | null {
+  void _id;
   return null;
 }
 
 export function meetingExists(_id: string): boolean {
+  void _id;
   return false;
 }

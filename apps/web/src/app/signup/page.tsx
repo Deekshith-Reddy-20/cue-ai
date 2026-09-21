@@ -6,7 +6,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, Lock, User, ArrowRight, Sparkles } from "lucide-react";
+import { Mail, Lock, User, ArrowRight, Sparkles, Eye, EyeOff } from "lucide-react";
 import { signupWithEmailApi, AUTH_BYPASS } from "@/lib/auth";
 import { CREDENTIALS_BYPASS } from "@/lib/auth-mode";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -61,6 +61,8 @@ export default function SignupPage() {
   const { refresh } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (AUTH_BYPASS) {
@@ -93,10 +95,16 @@ export default function SignupPage() {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    const password = String(form.get("password") || "");
+    const confirm = String(form.get("confirmPassword") || "");
+    if (!CREDENTIALS_BYPASS && password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
     await createAccount({
       name: String(form.get("name") || ""),
       email: String(form.get("email") || ""),
-      password: String(form.get("password") || ""),
+      password,
     });
   }
 
@@ -151,11 +159,41 @@ export default function SignupPage() {
         />
         <Input
           label="Password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           name="password"
           placeholder={CREDENTIALS_BYPASS ? "Optional while testing" : "At least 8 characters"}
           autoComplete="new-password"
           leftIcon={<Lock className="h-4 w-4" />}
+          rightIcon={
+            <button
+              type="button"
+              className="text-subtle transition hover:text-foreground"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          }
+          required={!CREDENTIALS_BYPASS}
+          minLength={CREDENTIALS_BYPASS ? undefined : 8}
+        />
+        <Input
+          label="Confirm password"
+          type={showConfirm ? "text" : "password"}
+          name="confirmPassword"
+          placeholder={CREDENTIALS_BYPASS ? "Optional while testing" : "Re-enter password"}
+          autoComplete="new-password"
+          leftIcon={<Lock className="h-4 w-4" />}
+          rightIcon={
+            <button
+              type="button"
+              className="text-subtle transition hover:text-foreground"
+              aria-label={showConfirm ? "Hide password" : "Show password"}
+              onClick={() => setShowConfirm((v) => !v)}
+            >
+              {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          }
           required={!CREDENTIALS_BYPASS}
           minLength={CREDENTIALS_BYPASS ? undefined : 8}
         />
