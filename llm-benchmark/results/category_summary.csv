@@ -1,0 +1,7 @@
+category,provider,model,model_id,questions,requests,success_rate,average_ttft_ms,median_ttft_ms,p90_ttft_ms,average_total_latency_ms,p90_total_latency_ms,average_tokens_per_sec,accuracy,quality
+TECHNICAL,OpenAI,GPT-4o mini,openai/gpt-4o-mini,1,1,0.0,,,,,,,,
+TECHNICAL,Google Gemini,Gemini 2.5 Flash Lite,google/gemini-2.5-flash-lite,1,1,0.0,,,,,,,,
+TECHNICAL,xAI Grok,Grok 4.20,x-ai/grok-4.20,1,1,0.0,,,,,,,,
+TECHNICAL,DeepSeek,DeepSeek Chat,deepseek/deepseek-chat,1,1,0.0,,,,,,,,
+TECHNICAL,Anthropic Claude,Claude Haiku 4.5,anthropic/claude-haiku-4.5,1,1,0.0,,,,,,,,
+TECHNICAL,Perplexity,Sonar,perplexity/sonar,1,1,0.0,,,,,,,,

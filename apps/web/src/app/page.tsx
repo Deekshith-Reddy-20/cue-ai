@@ -285,11 +285,70 @@ export default function LandingPage() {
             Go from conversation to decisions with an agent that listens, answers, and writes —
             editable, private, and ready before the call ends.
           </motion.p>
+
+          {/* Product selector — above Get started / Download */}
+          <motion.div
+            id="products"
+            className="mx-auto mt-10 grid max-w-[920px] gap-4 text-left sm:grid-cols-2"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.16 }}
+          >
+            <div className="rounded-3xl border border-[var(--lp-hairline)] bg-[var(--lp-surface)] p-6 sm:p-7">
+              <h2 className="text-xl font-semibold text-white">Resume Tailor</h2>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--lp-ink-muted)]">
+                Customize your resume for any job description using AI.
+              </p>
+              <ul className="mt-4 space-y-2 text-sm text-white/85">
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0 text-[var(--lp-accent)]" />
+                  ATS-friendly resumes
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0 text-[var(--lp-accent)]" />
+                  Job-specific tailoring
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0 text-[var(--lp-accent)]" />
+                  Instant AI suggestions
+                </li>
+              </ul>
+              <Pill href="/resume" className="mt-6 !px-4 !py-2.5 text-sm">
+                Open Resume Tailor
+                <ArrowRight className="h-4 w-4" />
+              </Pill>
+            </div>
+            <div className="rounded-3xl border border-[var(--lp-hairline)] bg-[var(--lp-surface)] p-6 sm:p-7">
+              <h2 className="text-xl font-semibold text-white">CueAI</h2>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--lp-ink-muted)]">
+                AI meeting assistance, interview preparation, and productivity support.
+              </p>
+              <ul className="mt-4 space-y-2 text-sm text-white/85">
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0 text-[var(--lp-accent)]" />
+                  Meeting assistance
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0 text-[var(--lp-accent)]" />
+                  Interview preparation
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0 text-[var(--lp-accent)]" />
+                  Personalized AI support
+                </li>
+              </ul>
+              <Pill href="/login?next=/dashboard" className="mt-6 !px-4 !py-2.5 text-sm">
+                Open CueAI
+                <ArrowRight className="h-4 w-4" />
+              </Pill>
+            </div>
+          </motion.div>
+
           <motion.div
             className="mt-9 flex flex-wrap items-center justify-center gap-3"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.18 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
           >
             <Pill href="/signup">
               Get started for free

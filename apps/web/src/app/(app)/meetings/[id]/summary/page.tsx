@@ -1,18 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
   HelpCircle,
-  Languages,
-  MessageSquare,
+  Lock,
+  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/components/providers/auth-provider";
+import { FREE_MEETING_QA_LIMIT } from "@/lib/app-access";
+import {
+  canViewFullMeetingQa,
+  resolveMeetingEntitlement,
+} from "@/lib/entitlements";
 import { fetchMeeting } from "@/lib/meetings-client";
 import type { MeetingRecord } from "@/lib/meetings-catalog";
 import { cn } from "@/lib/utils";
@@ -20,31 +26,32 @@ import { cn } from "@/lib/utils";
 export default function MeetingSummaryPage() {
   const params = useParams<{ id: string }>();
   const meetingId = typeof params.id === "string" ? params.id : "";
+  const { session } = useAuth();
 
-  const [meeting, setMeeting] = useState<MeetingRecord | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [emailBody, setEmailBody] = useState("");
-  const [regenCount, setRegenCount] = useState(0);
-  const [copied, setCopied] = useState(false);
+  const entitlement = useMemo(
+    () => resolveMeetingEntitlement({ role: session?.role }),
+    [session?.role],
+  );
+  const fullQa = canViewFullMeetingQa(entitlement);
+  const isAdmin = entitlement.source === "admin";
+
+  const [cache, setCache] = useState<{
+    id: string;
+    meeting: MeetingRecord | null;
+    error: string | null;
+  } | null>(null);
 
   useEffect(() => {
+    if (!meetingId) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setMeeting(null);
 
     void fetchMeeting(meetingId).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
-        setError(result.error);
-        setLoading(false);
+        setCache({ id: meetingId, meeting: null, error: result.error });
         return;
       }
-      setMeeting(result.meeting);
-      setEmailBody(result.meeting.emailBody);
-      setRegenCount(0);
-      setLoading(false);
+      setCache({ id: meetingId, meeting: result.meeting, error: null });
     });
 
     return () => {
@@ -52,25 +59,9 @@ export default function MeetingSummaryPage() {
     };
   }, [meetingId]);
 
-  async function copyEmail() {
-    if (!meeting) return;
-    try {
-      await navigator.clipboard.writeText(`Subject: ${meeting.emailSubject}\n\n${emailBody}`);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  function regenerateEmail() {
-    if (!meeting) return;
-    const next = regenCount + 1;
-    setRegenCount(next);
-    setEmailBody(
-      `${meeting.emailBody}\n\n(Updated draft v${next + 1}) Please also review the open risks section before sending.`,
-    );
-  }
+  const loading = Boolean(meetingId) && cache?.id !== meetingId;
+  const meeting = cache?.id === meetingId ? cache.meeting : null;
+  const error = cache?.id === meetingId ? cache.error : null;
 
   if (loading) {
     return (
@@ -102,6 +93,9 @@ export default function MeetingSummaryPage() {
   }
 
   const openCount = meeting.actionItems.filter((item) => item.status === "open").length;
+  const allAnswers = meeting.aiAnswers || [];
+  const visibleAnswers = fullQa ? allAnswers : allAnswers.slice(0, FREE_MEETING_QA_LIMIT);
+  const hiddenCount = Math.max(0, allAnswers.length - visibleAnswers.length);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 animate-fade-up">
@@ -118,20 +112,6 @@ export default function MeetingSummaryPage() {
             {meeting.generatedIn ? ` · Generated in ${meeting.generatedIn}` : ""}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href={`/translation?meetingId=${encodeURIComponent(meeting.id)}`}>
-            <Button variant="outline" size="sm">
-              <Languages className="h-3.5 w-3.5" />
-              Translation
-            </Button>
-          </Link>
-          <Link href={`/meetings/${encodeURIComponent(meeting.id)}/feed`}>
-            <Button variant="gradient" size="sm">
-              <MessageSquare className="h-3.5 w-3.5" />
-              Conversation feed
-            </Button>
-          </Link>
-        </div>
       </div>
 
       <Card glow className="p-6">
@@ -145,7 +125,7 @@ export default function MeetingSummaryPage() {
         {meeting.keyDecisions.length > 0 && (
           <Card className="p-5">
             <CardHeader>
-              <CardTitle>Key decisions</CardTitle>
+              <CardTitle>Key points</CardTitle>
             </CardHeader>
             <ul className="space-y-3">
               {meeting.keyDecisions.map((decision) => (
@@ -158,22 +138,61 @@ export default function MeetingSummaryPage() {
           </Card>
         )}
 
-        {meeting.aiAnswers.length > 0 && (
-          <Card className="p-5">
+        {allAnswers.length > 0 && (
+          <Card className="p-5 md:col-span-2">
             <CardHeader>
-              <CardTitle>Asked in this session</CardTitle>
+              <CardTitle>Questions &amp; answers</CardTitle>
+              {!fullQa && (
+                <Badge variant="warning">
+                  Showing {visibleAnswers.length} of {allAnswers.length}
+                </Badge>
+              )}
             </CardHeader>
-            <ul className="space-y-3">
-              {meeting.aiAnswers.slice(0, 8).map((answer) => (
-                <li key={answer.id} className="flex gap-2 text-sm text-foreground/90">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-400" />
-                  <span>
-                    <span className="font-medium">{answer.question}</span>
-                    <span className="mt-1 block text-muted">{answer.answer}</span>
-                  </span>
+            <ul className="space-y-4">
+              {visibleAnswers.map((answer, index) => (
+                <li key={answer.id} className="rounded-xl border border-[var(--border)] p-4 text-sm">
+                  <p className="font-medium text-foreground">
+                    {index + 1}. {answer.question}
+                  </p>
+                  <p className="mt-2 text-muted">{answer.answer}</p>
                 </li>
               ))}
             </ul>
+            {hiddenCount > 0 && (
+              <div className="mt-5 rounded-2xl border border-teal-500/25 bg-teal-500/10 p-5">
+                <div className="flex items-start gap-3">
+                  <Lock className="mt-0.5 h-5 w-5 shrink-0 text-teal-300" />
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold tracking-tight">
+                      Unlock complete meeting summary
+                    </h3>
+                    <p className="mt-1 text-sm text-muted">
+                      {hiddenCount} more question{hiddenCount === 1 ? "" : "s"} hidden on the free
+                      plan. Upgrade for full Q&amp;A and meeting insights.
+                    </p>
+                    <ul className="mt-3 space-y-1 text-sm text-foreground/90">
+                      <li className="flex items-center gap-2">
+                        <Sparkles className="h-3.5 w-3.5 text-teal-300" />
+                        All questions and answers
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Sparkles className="h-3.5 w-3.5 text-teal-300" />
+                        Complete meeting details
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Sparkles className="h-3.5 w-3.5 text-teal-300" />
+                        Full meeting insights
+                      </li>
+                    </ul>
+                    <Link href="/settings#billing" className="mt-4 inline-block">
+                      <Button variant="gradient" size="sm">
+                        Upgrade to Premium
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
@@ -207,7 +226,8 @@ export default function MeetingSummaryPage() {
           </Card>
         )}
 
-        {meeting.transcript.length > 0 && (
+        {/* Transcript: admins only — never for normal users */}
+        {isAdmin && meeting.transcript.length > 0 && (
           <Card className="p-5">
             <CardHeader>
               <CardTitle>Transcript</CardTitle>
@@ -261,22 +281,6 @@ export default function MeetingSummaryPage() {
           </div>
         </Card>
       )}
-
-      <Card className="p-5">
-        <CardTitle className="mb-3">Follow-up email draft</CardTitle>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/50 p-4 text-sm leading-relaxed text-muted">
-          <p className="text-foreground">Subject: {meeting.emailSubject}</p>
-          <p className="mt-3 whitespace-pre-wrap">{emailBody}</p>
-        </div>
-        <div className="mt-3 flex gap-2">
-          <Button size="sm" variant="primary" onClick={() => void copyEmail()}>
-            {copied ? "Copied" : "Copy email"}
-          </Button>
-          <Button size="sm" variant="outline" onClick={regenerateEmail}>
-            Regenerate
-          </Button>
-        </div>
-      </Card>
     </div>
   );
 }

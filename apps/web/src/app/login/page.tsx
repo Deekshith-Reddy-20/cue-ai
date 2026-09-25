@@ -62,18 +62,29 @@ function AuthShell({
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { refresh } = useAuth();
+  const { refresh, session, ready } = useAuth();
   const [loading, setLoading] = useState<"user" | "admin" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
+  const safeNext = (() => {
+    const next = searchParams.get("next");
+    return next && next.startsWith("/") ? next : "/dashboard";
+  })();
+
   useEffect(() => {
     if (AUTH_BYPASS) {
       void refresh();
-      router.replace("/dashboard");
+      router.replace(safeNext);
     }
-  }, [router, refresh]);
+  }, [router, refresh, safeNext]);
+
+  // Already signed in — honor `next` (e.g. /resume or /dashboard), do not force CueAI.
+  useEffect(() => {
+    if (AUTH_BYPASS || !ready || !session) return;
+    router.replace(safeNext);
+  }, [AUTH_BYPASS, ready, session, router, safeNext]);
 
   useEffect(() => {
     const authError = searchParams.get("error");
@@ -156,7 +167,7 @@ function LoginForm() {
       }
     >
       <SocialAuthButtons
-        callbackUrl="/dashboard"
+        callbackUrl={safeNext}
         onBypass={CREDENTIALS_BYPASS ? () => signIn("user") : undefined}
       />
 

@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { motion, type Variants } from "framer-motion";
 import {
+  AppWindow,
   ArrowUpRight,
-  FileText,
-  Library,
-  Monitor,
+  Settings,
   Sparkles,
+  Video,
 } from "lucide-react";
 import {
   Area,
@@ -18,10 +18,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Progress } from "@/components/ui/misc";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useTheme } from "@/components/providers/theme-provider";
 import { greetingFor } from "@/lib/auth";
+import { canAccessAdmin } from "@/lib/roles";
 import "./dashboard.css";
 
 const fade: Variants = {
@@ -46,21 +46,11 @@ type MeetingRow = {
   attendees?: number;
 };
 
-const quickActions = [
-  { href: "/resume", icon: FileText, label: "Tailor a resume" },
-  { href: "/knowledge", icon: Library, label: "Upload to Knowledge" },
-  { href: "/screen-context", icon: Monitor, label: "Enable Screen AI" },
-  { href: "/translation", icon: Sparkles, label: "Start translation" },
-];
-
-const emptyUsage = [
-  { day: "Mon", tokens: 0 },
-  { day: "Tue", tokens: 0 },
-  { day: "Wed", tokens: 0 },
-  { day: "Thu", tokens: 0 },
-  { day: "Fri", tokens: 0 },
-  { day: "Sat", tokens: 0 },
-  { day: "Sun", tokens: 0 },
+const userShortcuts = [
+  { href: "/meetings", icon: Video, label: "Meetings", hint: "Completed summaries" },
+  { href: "/meetings/live", icon: Sparkles, label: "Live Session", hint: "Start a live session" },
+  { href: "/companion", icon: AppWindow, label: "Desktop Companion", hint: "Open the overlay" },
+  { href: "/settings", icon: Settings, label: "Settings", hint: "Preferences" },
 ];
 
 function formatDuration(sec?: number) {
@@ -69,11 +59,31 @@ function formatDuration(sec?: number) {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+function buildWeeklyUsage(meetings: MeetingRow[]) {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const buckets = days.map((day) => ({ day, minutes: 0 }));
+  const now = new Date();
+  const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  for (const m of meetings) {
+    if (!m.startedAt || m.status === "live") continue;
+    const t = Date.parse(m.startedAt);
+    if (!Number.isFinite(t) || t < weekAgo) continue;
+    const d = new Date(t).getDay();
+    buckets[d]!.minutes += Math.max(0, Math.round((m.durationSec || 0) / 60));
+  }
+  // Present Mon→Sun
+  return [...buckets.slice(1), buckets[0]!].map((b) => ({
+    day: b.day,
+    tokens: b.minutes,
+  }));
+}
+
 export default function DashboardPage() {
   const { session, ready } = useAuth();
   const { theme } = useTheme();
   const name = session?.name || "there";
   const workspace = session?.workspace || "Your Workspace";
+  const admin = canAccessAdmin(session?.role);
   const isLight = theme === "light";
   const chartTick = isLight ? "#999999" : "#666666";
   const chartStroke = isLight ? "#090909" : "#ffffff";
@@ -108,38 +118,16 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const meetingCount = meetings.length;
-  const pinnedAnswers = 0;
-  const hoursTranscribed = meetings.reduce(
+  const completed = meetings.filter((m) => m.status !== "live");
+  const meetingCount = completed.length;
+  const hoursTranscribed = completed.reduce(
     (sum, m) => sum + (typeof m.durationSec === "number" ? m.durationSec : 0),
     0,
   );
   const hoursLabel = (hoursTranscribed / 3600).toFixed(1);
-
-  const stats = [
-    {
-      label: "Meetings this week",
-      value: loaded ? String(meetingCount) : "—",
-      delta: loaded ? (meetingCount ? "From your workspace" : "No meetings yet") : "Loading…",
-    },
-    {
-      label: "Completed sessions",
-      value: loaded ? String(meetingCount) : "—",
-      delta: loaded ? (meetingCount ? "Saved history" : "None yet") : "Loading…",
-    },
-    {
-      label: "Hours transcribed",
-      value: loaded ? hoursLabel : "—",
-      delta: loaded ? (hoursTranscribed ? "From saved sessions" : "No activity data yet") : "Loading…",
-    },
-    {
-      label: "AI answers pinned",
-      value: loaded ? String(pinnedAnswers) : "—",
-      delta: loaded ? (pinnedAnswers ? "Saved" : "None pinned yet") : "Loading…",
-    },
-  ];
-
-  const recent = meetings.filter((m) => m.status !== "live").slice(0, 5);
+  const recent = completed.slice(0, 5);
+  const usageData = buildWeeklyUsage(completed);
+  const hasUsage = usageData.some((d) => d.tokens > 0);
 
   return (
     <div data-dashboard>
@@ -157,13 +145,32 @@ export default function DashboardPage() {
           <p className="db-hero-sub">
             {session
               ? `${workspace} · signed in as ${session.email}`
-              : "Your AI copilot is ready. Sign up to personalize this workspace."}
+              : "Your AI meeting copilot."}
           </p>
         </div>
       </motion.header>
 
       <div className="db-metrics">
-        {stats.map((s, i) => (
+        {[
+          {
+            label: "Meeting summaries",
+            value: loaded ? String(meetingCount) : "—",
+            delta: loaded
+              ? meetingCount
+                ? "From your workspace"
+                : "No summaries yet"
+              : "Loading…",
+          },
+          {
+            label: "Hours transcribed",
+            value: loaded ? hoursLabel : "—",
+            delta: loaded
+              ? hoursTranscribed
+                ? "From saved sessions"
+                : "No activity yet"
+              : "Loading…",
+          },
+        ].map((s, i) => (
           <motion.div
             key={s.label}
             className="db-metric"
@@ -187,29 +194,29 @@ export default function DashboardPage() {
       <div className="db-main">
         <motion.section
           className="db-panel"
-          custom={5}
+          custom={3}
           variants={fade}
           initial="hidden"
           animate="show"
         >
           <div className="db-panel-head">
             <div>
-              <h2 className="db-section-title">Weekly AI usage</h2>
+              <h2 className="db-section-title">Weekly meeting activity</h2>
               <p className="db-section-sub">
-                {meetingCount
-                  ? "Based on your saved sessions"
-                  : "No activity data available yet"}
+                {hasUsage
+                  ? "Minutes transcribed from your completed sessions"
+                  : "No usage data yet"}
               </p>
             </div>
             <span className="db-chip">This week</span>
           </div>
           <div className="db-chart">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={emptyUsage}>
+              <AreaChart data={usageData}>
                 <defs>
                   <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#0099ff" stopOpacity={0.32} />
-                    <stop offset="100%" stopColor="#0099ff" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.32} />
+                    <stop offset="100%" stopColor="#14b8a6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis
@@ -219,7 +226,10 @@ export default function DashboardPage() {
                   tick={{ fill: chartTick, fontSize: 12 }}
                 />
                 <YAxis hide />
-                <Tooltip contentStyle={tooltipStyle} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(value) => [`${value ?? 0} min`, "Transcribed"]}
+                />
                 <Area
                   type="monotone"
                   dataKey="tokens"
@@ -233,132 +243,84 @@ export default function DashboardPage() {
         </motion.section>
 
         <motion.section
-          className="db-panel db-meters"
-          custom={6}
-          variants={fade}
-          initial="hidden"
-          animate="show"
-        >
-          <div>
-            <h2 className="db-section-title">Resource usage</h2>
-            <p className="db-section-sub">Usage meters (zeros until billing/usage APIs connect)</p>
-          </div>
-          <div className="space-y-5">
-            <div>
-              <div className="db-meter-row">
-                <span className="db-meter-label">AI tokens</span>
-                <span className="db-meter-hint">No usage data yet</span>
-              </div>
-              <Progress value={0} />
-            </div>
-            <div>
-              <div className="db-meter-row">
-                <span className="db-meter-label">Storage</span>
-                <span className="db-meter-hint">No usage data yet</span>
-              </div>
-              <Progress value={0} />
-            </div>
-            <div>
-              <div className="db-meter-row">
-                <span className="db-meter-label">Desktop Companion</span>
-                <span className="db-meter-hint">Check Desktop status</span>
-              </div>
-              <Progress value={0} />
-            </div>
-          </div>
-          <p className="db-plan-note">
-            Manage your plan in{" "}
-            <Link href="/settings" className="db-link">
-              Settings
-            </Link>
-          </p>
-        </motion.section>
-      </div>
-
-      <div className="db-lower">
-        <motion.section
           className="db-panel"
-          custom={7}
+          custom={4}
           variants={fade}
           initial="hidden"
           animate="show"
         >
           <div className="db-panel-head">
-            <div>
-              <h2 className="db-section-title">Recent meetings</h2>
-              <p className="db-section-sub">Jump back into context</p>
-            </div>
-            <Link href="/meetings" className="db-link">
-              View all
-            </Link>
-          </div>
-          <div>
-            {recent.length === 0 ? (
-              <p className="db-section-sub" style={{ padding: "12px 0" }}>
-                No meetings yet.
-              </p>
-            ) : (
-              recent.map((m) => (
-                <Link
-                  key={m.id}
-                  href={`/meetings/${m.id}/summary`}
-                  className="db-meeting"
-                >
-                  <div>
-                    <p className="db-meeting-title">{m.title}</p>
-                    <p className="db-meeting-meta">
-                      {m.startedAt || "Saved session"}
-                      {typeof m.attendees === "number"
-                        ? ` · ${m.attendees} people`
-                        : ""}
-                    </p>
-                  </div>
-                  <div className="db-meeting-side">
-                    {formatDuration(m.durationSec)}
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        </motion.section>
-
-        <motion.section
-          className="db-panel"
-          custom={8}
-          variants={fade}
-          initial="hidden"
-          animate="show"
-        >
-          <div className="db-panel-head">
-            <h2 className="db-section-title">Quick actions</h2>
+            <h2 className="db-section-title">Go to</h2>
           </div>
           <div className="db-actions">
-            {quickActions.map((a) => (
+            {userShortcuts.map((a) => (
               <Link key={a.href} href={a.href} className="db-action">
-                <span>{a.label}</span>
+                <span>
+                  <span className="block">{a.label}</span>
+                  <span className="mt-0.5 block text-xs text-muted">{a.hint}</span>
+                </span>
                 <a.icon className="db-action-icon h-4 w-4" />
               </Link>
             ))}
-          </div>
-        </motion.section>
-
-        <motion.section
-          className="db-panel"
-          custom={9}
-          variants={fade}
-          initial="hidden"
-          animate="show"
-        >
-          <div className="db-panel-head">
-            <h2 className="db-section-title">Activity</h2>
-          </div>
-          <div className="db-activity">
-            <p className="db-section-sub" style={{ padding: "8px 0" }}>
-              No activity data available yet.
-            </p>
+            {admin ? (
+              <Link href="/admin" className="db-action">
+                <span>
+                  <span className="block">Admin Portal</span>
+                  <span className="mt-0.5 block text-xs text-muted">Workspace management</span>
+                </span>
+                <Settings className="db-action-icon h-4 w-4" />
+              </Link>
+            ) : null}
           </div>
         </motion.section>
       </div>
+
+      <motion.section
+        className="db-panel"
+        custom={5}
+        variants={fade}
+        initial="hidden"
+        animate="show"
+        style={{ marginTop: 16 }}
+      >
+        <div className="db-panel-head">
+          <div>
+            <h2 className="db-section-title">Recent meeting summaries</h2>
+            <p className="db-section-sub">Completed sessions only</p>
+          </div>
+          <Link href="/meetings" className="db-link">
+            View all
+          </Link>
+        </div>
+        <div>
+          {recent.length === 0 ? (
+            <div style={{ padding: "12px 0" }}>
+              <p className="db-section-sub">No meeting summaries yet.</p>
+              <Link
+                href="/meetings/live"
+                className="db-link"
+                style={{ display: "inline-block", marginTop: 8 }}
+              >
+                Start a Live Session
+              </Link>
+            </div>
+          ) : (
+            recent.map((m) => (
+              <Link
+                key={m.id}
+                href={`/meetings/${m.id}/summary`}
+                className="db-meeting"
+              >
+                <div>
+                  <p className="db-meeting-title">{m.title}</p>
+                  <p className="db-meeting-meta">{m.startedAt || "Saved session"}</p>
+                </div>
+                <div className="db-meeting-side">{formatDuration(m.durationSec)}</div>
+              </Link>
+            ))
+          )}
+        </div>
+      </motion.section>
     </div>
   );
 }

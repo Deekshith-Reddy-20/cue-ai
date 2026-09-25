@@ -8,6 +8,7 @@ import {
   Pin,
   Play,
   RefreshCw,
+  Sparkles,
   Square,
   Volume2,
 } from "lucide-react";
@@ -16,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { CompanionAI } from "@/components/companion/companion-services";
 import { cn } from "@/lib/utils";
 import {
-  getDesktop,
   hideCompanionOverlay,
   isDesktopApp,
   openCompanionOverlay,
@@ -55,6 +55,12 @@ export default function LiveMeetingPage() {
   const meetingIdRef = useRef<string | null>(null);
   meetingIdRef.current = meetingId;
   const [hydrated, setHydrated] = useState(false);
+  const [wizardKey, setWizardKey] = useState(0);
+  const [starting, setStarting] = useState(false);
+  /** Idle = Start Live Session screen; setup = Create Session wizard. */
+  const [phase, setPhase] = useState<"idle" | "setup">("idle");
+  const startAbortRef = useRef<AbortController | null>(null);
+  const startingLockRef = useRef(false);
 
   useEffect(() => {
     setHydrated(true);
@@ -68,7 +74,32 @@ export default function LiveMeetingPage() {
     return () => window.removeEventListener("cueai:end-session", onEndFromOverlay);
   }, []);
 
+  function cancelSetup() {
+    startAbortRef.current?.abort();
+    startAbortRef.current = null;
+    startingLockRef.current = false;
+    setStarting(false);
+    clearLiveSessionConfig();
+    setMeetingId(null);
+    setSession(null);
+    void startDesktopMeetingSession({
+      active: false,
+      screenSharing: false,
+      cueAiMode: "inactive",
+      hideCompanion: true,
+    });
+    void hideCompanionOverlay();
+    setWizardKey((k) => k + 1);
+    setPhase("idle");
+  }
+
   async function beginSession(config: LiveSessionConfig) {
+    if (startingLockRef.current) return;
+    startingLockRef.current = true;
+    const ac = new AbortController();
+    startAbortRef.current = ac;
+    setStarting(true);
+
     const title = sessionTitle(config);
     saveLiveSessionConfig(config);
     let createdId: string | null = null;
@@ -85,9 +116,15 @@ export default function LiveMeetingPage() {
           resumeText: config.resumeText,
           description: config.description,
         }),
+        signal: ac.signal,
       });
     } catch {
       // Briefing write is best-effort; meeting create still tries.
+    }
+    if (ac.signal.aborted) {
+      startingLockRef.current = false;
+      setStarting(false);
+      return;
     }
     try {
       const res = await fetch("/api/meetings", {
@@ -103,11 +140,24 @@ export default function LiveMeetingPage() {
           resumeText: config.resumeText,
           description: config.description,
         }),
+        signal: ac.signal,
       });
       const data = (await res.json().catch(() => ({}))) as { meeting?: { id?: string } };
       createdId = data.meeting?.id || null;
     } catch {
       // Overlay still works if persistence fails.
+    }
+    if (ac.signal.aborted) {
+      // Drop orphaned live meeting if we created one then cancelled.
+      if (createdId) {
+        void fetch(`/api/meetings/${encodeURIComponent(createdId)}`, {
+          method: "DELETE",
+        }).catch(() => undefined);
+      }
+      clearLiveSessionConfig();
+      startingLockRef.current = false;
+      setStarting(false);
+      return;
     }
     const next = { ...config, meetingId: createdId || config.meetingId };
     saveLiveSessionConfig(next);
@@ -122,6 +172,9 @@ export default function LiveMeetingPage() {
       showCompanion: true,
     });
     setSession(next);
+    startingLockRef.current = false;
+    setStarting(false);
+    startAbortRef.current = null;
   }
 
   function endSession(durationSec = 0, spoken: { who: string; text: string }[] = []) {
@@ -161,11 +214,43 @@ export default function LiveMeetingPage() {
   if (!session) {
     return (
       <div data-live>
-        <CreateSessionWizard onComplete={(config) => void beginSession(config)} />
-        <p className="mt-4 text-center text-xs text-subtle">
-          Starting a session opens the CueAI companion overlay (same as Ctrl+Shift+Space). Keep
-          CueAI Desktop running for the pop-out window.
-        </p>
+        {starting ? (
+          <div className="mx-auto flex max-w-lg flex-col items-center gap-4 py-16 text-center">
+            <p className="text-sm text-muted">Starting live session…</p>
+            <Button type="button" variant="secondary" onClick={cancelSetup}>
+              Cancel
+            </Button>
+          </div>
+        ) : phase === "idle" ? (
+          <div className="mx-auto flex max-w-lg flex-col items-center gap-5 py-20 text-center animate-fade-up">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-500/15 text-teal-300">
+              <Sparkles className="h-7 w-7" />
+            </div>
+            <div>
+              <h1 className="font-display text-2xl font-semibold tracking-tight">
+                Live Session
+              </h1>
+              <p className="mt-2 text-sm text-muted">
+                Start a live CueAI session for real-time transcription and AI answers.
+              </p>
+            </div>
+            <Button type="button" variant="gradient" onClick={() => setPhase("setup")}>
+              Start Live Session
+            </Button>
+          </div>
+        ) : (
+          <>
+            <CreateSessionWizard
+              key={wizardKey}
+              onCancel={cancelSetup}
+              onComplete={(config) => void beginSession(config)}
+            />
+            <p className="mt-4 text-center text-xs text-subtle">
+              Starting a session opens the CueAI companion overlay (same as Ctrl+Shift+Space). Keep
+              CueAI Desktop running for the pop-out window.
+            </p>
+          </>
+        )}
       </div>
     );
   }

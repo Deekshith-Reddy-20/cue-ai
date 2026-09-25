@@ -20,21 +20,33 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { canAccessAdmin } from "@/lib/roles";
+import { isCueaiUserNavHref } from "@/lib/app-access";
 
-const nav = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof Video;
+  adminOnly?: boolean;
+  /** Hidden from everyone in authenticated CueAI nav (product lives elsewhere or UI retired). */
+  hideFromNav?: boolean;
+  /** Extra CueAI modules — admins only (not normal users). */
+  adminExtra?: boolean;
+};
+
+const FULL_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/meetings", label: "Meetings", icon: Video },
   { href: "/meetings/live", label: "Live Session", icon: Sparkles },
-  { href: "/resume", label: "Resume Tailor", icon: FileText },
-  { href: "/knowledge", label: "Knowledge Base", icon: Library },
-  { href: "/translation", label: "Translation", icon: Languages },
-  { href: "/screen-context", label: "Screen Context", icon: Monitor },
+  { href: "/resume", label: "Resume Tailor", icon: FileText, hideFromNav: true },
+  // Knowledge stays out of all CueAI nav (Admin Portal + sidebar); backend APIs retained.
+  { href: "/knowledge", label: "Knowledge Base", icon: Library, hideFromNav: true },
+  { href: "/translation", label: "Translation", icon: Languages, adminExtra: true },
+  { href: "/screen-context", label: "Screen Context", icon: Monitor, adminExtra: true },
   { href: "/companion", label: "Desktop Companion", icon: AppWindow },
-  { href: "/admin", label: "Admin Portal", icon: Shield, adminOnly: true as const },
+  { href: "/admin", label: "Admin Portal", icon: Shield, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-/** Avoid `/meetings` staying active on `/meetings/live` (and similar overlaps). */
 function isNavActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") {
     return pathname === "/dashboard";
@@ -56,7 +68,15 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { session } = useAuth();
-  const showAdmin = canAccessAdmin(session?.role);
+  const admin = canAccessAdmin(session?.role);
+
+  const nav = FULL_NAV.filter((item) => {
+    if (item.hideFromNav) return false;
+    if (item.adminOnly) return admin;
+    if (item.adminExtra) return admin;
+    if (!admin) return isCueaiUserNavHref(item.href);
+    return true;
+  });
 
   return (
     <aside
@@ -97,40 +117,38 @@ export function Sidebar() {
       <nav className="cue-scroll flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
         {!collapsed && (
           <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-subtle">
-            Workspace
+            {admin ? "CueAI" : "CueAI"}
           </p>
         )}
-        {nav
-          .filter((item) => !item.adminOnly || showAdmin)
-          .map((item) => {
-            const active = isNavActive(pathname, item.href);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={collapsed ? item.label : undefined}
+        {nav.map((item) => {
+          const active = isNavActive(pathname, item.href);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              title={collapsed ? item.label : undefined}
+              className={cn(
+                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                active
+                  ? "bg-[var(--surface-active)] text-foreground"
+                  : "text-muted hover:bg-[var(--surface-hover)] hover:text-foreground",
+                collapsed && "justify-center px-2"
+              )}
+            >
+              <Icon
                 className={cn(
-                  "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                  active
-                    ? "bg-[var(--surface-active)] text-foreground"
-                    : "text-muted hover:bg-[var(--surface-hover)] hover:text-foreground",
-                  collapsed && "justify-center px-2"
+                  "h-[18px] w-[18px] shrink-0 transition-transform group-hover:scale-105",
+                  active && "text-foreground"
                 )}
-              >
-                <Icon
-                  className={cn(
-                    "h-[18px] w-[18px] shrink-0 transition-transform group-hover:scale-105",
-                    active && "text-foreground"
-                  )}
-                />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-                {!collapsed && active && (
-                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-foreground" />
-                )}
-              </Link>
-            );
-          })}
+              />
+              {!collapsed && <span className="truncate">{item.label}</span>}
+              {!collapsed && active && (
+                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-foreground" />
+              )}
+            </Link>
+          );
+        })}
       </nav>
     </aside>
   );

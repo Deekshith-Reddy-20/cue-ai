@@ -203,11 +203,21 @@ export default function MeetingsPage() {
       </div>
 
       {loaded && !error && filtered.length === 0 && (
-        <p className="py-8 text-center text-sm text-muted">
-          {meetings.length === 0
-            ? "No meetings yet."
-            : `No meetings match your search${statusFilter !== "all" ? " or filters" : ""}.`}
-        </p>
+        <div className="space-y-4 py-8 text-center">
+          <p className="text-sm text-muted">
+            {meetings.length === 0
+              ? "No meeting summaries yet."
+              : `No meetings match your search${statusFilter !== "all" ? " or filters" : ""}.`}
+          </p>
+          {meetings.length === 0 && (
+            <Link href="/meetings/live">
+              <Button variant="gradient">
+                <Video className="h-4 w-4" />
+                Start a Live Session
+              </Button>
+            </Link>
+          )}
+        </div>
       )}
     </div>
   );

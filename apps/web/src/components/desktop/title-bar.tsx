@@ -6,18 +6,21 @@ import { BrandMark } from "@/components/ui/logo";
 import { getDesktop, isDesktopApp } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
 
-/** Frameless window chrome — only rendered inside Electron. */
+/** Frameless window chrome — only rendered inside Electron. Top-right: min / max / close. */
 export function DesktopTitleBar() {
-  const [visible, setVisible] = useState(false);
+  const visible = isDesktopApp();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
-    setVisible(isDesktopApp());
+    if (!visible) return;
     const desktop = getDesktop();
     if (!desktop) return;
-    void desktop.isMaximized().then(setMaximized);
+    let active = true;
+    void desktop.isMaximized().then((value) => {
+      if (active) setMaximized(value);
+    });
     return desktop.onMaximizedChange(setMaximized);
-  }, []);
+  }, [visible]);
 
   if (!visible) return null;
 
@@ -25,44 +28,36 @@ export function DesktopTitleBar() {
 
   return (
     <header
-      className="flex h-10 shrink-0 items-center border-b border-[var(--border)] bg-[var(--background-elevated)]/90 px-3 backdrop-blur-xl"
+      className="flex h-10 shrink-0 items-center border-b border-[var(--border)] bg-[var(--background-elevated)]/90 px-2 backdrop-blur-xl"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 pl-1">
         <BrandMark size="sm" className="h-5 w-5" />
         <span className="text-xs font-semibold tracking-tight">CueAI</span>
-        <span className="rounded-md border border-teal-500/20 bg-teal-500/10 px-1.5 py-0.5 text-[10px] text-teal-300">
-          Desktop
-        </span>
       </div>
 
       <div
-        className="ml-auto flex items-center gap-0.5"
+        className="ml-auto flex h-full items-stretch"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <button
-          type="button"
-          aria-label="Open companion"
-          className="rounded-lg px-2 py-1.5 text-[11px] text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
-          onClick={() => void desktop?.toggleCompanion()}
-        >
-          Companion
-        </button>
-        <IconBtn label="Minimize" onClick={() => void desktop?.minimize()}>
+        <WinBtn label="Minimize" onClick={() => void desktop?.minimize()}>
           <Minus className="h-3.5 w-3.5" />
-        </IconBtn>
-        <IconBtn label={maximized ? "Restore" : "Maximize"} onClick={() => void desktop?.maximize()}>
+        </WinBtn>
+        <WinBtn
+          label={maximized ? "Restore" : "Maximize"}
+          onClick={() => void desktop?.maximize()}
+        >
           {maximized ? <Copy className="h-3 w-3" /> : <Square className="h-3 w-3" />}
-        </IconBtn>
-        <IconBtn label="Close" danger onClick={() => void desktop?.close()}>
+        </WinBtn>
+        <WinBtn label="Close" danger onClick={() => void desktop?.close()}>
           <X className="h-3.5 w-3.5" />
-        </IconBtn>
+        </WinBtn>
       </div>
     </header>
   );
 }
 
-function IconBtn({
+function WinBtn({
   children,
   onClick,
   label,
@@ -79,8 +74,10 @@ function IconBtn({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "rounded-lg p-1.5 text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground",
-        danger && "hover:bg-red-500/20 hover:text-red-400"
+        "flex h-full w-11 items-center justify-center text-muted transition",
+        danger
+          ? "hover:bg-[#e81123] hover:text-white"
+          : "hover:bg-[var(--surface-hover)] hover:text-foreground",
       )}
     >
       {children}

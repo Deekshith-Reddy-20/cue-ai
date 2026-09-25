@@ -11,24 +11,25 @@ import {
   LogOut,
   Video,
   FileText,
-  BookOpen,
   Settings,
   Check,
+  AppWindow,
+  Shield,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/components/providers/auth-provider";
+import { canAccessAdmin } from "@/lib/roles";
 import { useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
 import { toggleCompanionOverlay } from "@/lib/desktop";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-const COMMAND_LINKS = [
+const USER_COMMAND_LINKS = [
   { label: "Start live meeting", href: "/meetings/live", icon: Video },
   { label: "Meetings", href: "/meetings", icon: FileText },
-  { label: "Knowledge Base", href: "/knowledge", icon: BookOpen },
+  { label: "Desktop Companion", href: "/companion", icon: AppWindow },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
@@ -38,18 +39,23 @@ export function Topbar() {
   const { theme, toggleTheme } = useTheme();
   const { session, logout } = useAuth();
   const router = useRouter();
+  const admin = canAccessAdmin(session?.role);
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
-  // No seeded/fake notifications — only real items if added later.
-  const [notifs, setNotifs] = useState<NotifItem[]>([]);
+  const [notifs] = useState<NotifItem[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
-  // Avoid SSR/client mismatch: cueDesktop / bridge only exist after mount.
   const [desktopReady, setDesktopReady] = useState(false);
   const commandInputRef = useRef<HTMLInputElement>(null);
   const menuRootRef = useRef<HTMLElement | null>(null);
+
+  function closeMenus() {
+    setNotifOpen(false);
+    setProfileOpen(false);
+    setWorkspaceOpen(false);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -83,19 +89,17 @@ export function Topbar() {
 
   useEffect(() => {
     if (!commandOpen) return;
-    commandInputRef.current?.focus();
+    const t = window.setTimeout(() => commandInputRef.current?.focus(), 30);
+    return () => window.clearTimeout(t);
   }, [commandOpen]);
 
   useEffect(() => {
-    if (!notifOpen && !profileOpen && !workspaceOpen) return;
-    function onPointerDown(e: MouseEvent) {
-      const root = menuRootRef.current;
-      if (root && !root.contains(e.target as Node)) {
-        closeMenus();
-      }
+    function onPointer(e: MouseEvent) {
+      if (!menuRootRef.current) return;
+      if (!menuRootRef.current.contains(e.target as Node)) closeMenus();
     }
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
+    document.addEventListener("mousedown", onPointer);
+    return () => document.removeEventListener("mousedown", onPointer);
   }, [notifOpen, profileOpen, workspaceOpen]);
 
   const displayName = session?.name || "Guest";
@@ -103,8 +107,12 @@ export function Topbar() {
   const initial = displayName.trim().charAt(0).toUpperCase() || "C";
   const unread = notifs.filter((n) => !readIds.includes(n.id)).length;
 
-  const filteredCommands = COMMAND_LINKS.filter((c) =>
-    c.label.toLowerCase().includes(commandQuery.trim().toLowerCase())
+  const commandLinks = [
+    ...USER_COMMAND_LINKS,
+    ...(admin ? [{ label: "Admin Portal", href: "/admin", icon: Shield }] : []),
+  ];
+  const filteredCommands = commandLinks.filter((c) =>
+    c.label.toLowerCase().includes(commandQuery.trim().toLowerCase()),
   );
 
   async function handleLogout() {
@@ -121,12 +129,6 @@ export function Topbar() {
     router.push("/meetings/live");
   }
 
-  function closeMenus() {
-    setNotifOpen(false);
-    setProfileOpen(false);
-    setWorkspaceOpen(false);
-  }
-
   return (
     <header
       ref={menuRootRef}
@@ -140,145 +142,88 @@ export function Topbar() {
             setNotifOpen(false);
             setProfileOpen(false);
           }}
-          className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-solid)] px-3 py-1.5 text-sm transition hover:border-[var(--border-strong)]"
+          className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm transition hover:bg-[var(--surface-hover)]"
         >
-          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-foreground text-[10px] font-bold text-[var(--background)]">
-            {initial}
-          </span>
           <span className="max-w-[140px] truncate font-medium">{workspace}</span>
-          <ChevronDown className="h-3.5 w-3.5 text-subtle" />
+          <ChevronDown className="h-3.5 w-3.5 text-muted" />
         </button>
-        {workspaceOpen && (
-          <div className="absolute left-0 top-11 w-56 rounded-2xl border border-[var(--border)] bg-[var(--surface-solid)] p-2 shadow-[var(--shadow-lg)]">
-            <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-subtle">
-              Workspace
-            </p>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium text-foreground"
-              onClick={() => setWorkspaceOpen(false)}
-            >
-              <Check className="h-3.5 w-3.5 text-foreground" />
-              {workspace}
-            </button>
-            <Link
-              href="/settings"
-              className="mt-1 block rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
-              onClick={() => setWorkspaceOpen(false)}
-            >
-              Workspace settings
-            </Link>
-            <Link
-              href="/dashboard"
-              className="block rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
-              onClick={() => setWorkspaceOpen(false)}
-            >
-              Dashboard
-            </Link>
-          </div>
-        )}
       </div>
-
-      <button
-        type="button"
-        data-command-trigger
-        onClick={() => {
-          closeMenus();
-          setCommandOpen(true);
-          setCommandQuery("");
-        }}
-        className="group flex h-9 max-w-md flex-1 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-solid)] px-3 text-sm text-subtle transition hover:border-[var(--border-strong)]"
-      >
-        <Search className="h-4 w-4" />
-        <span className="flex-1 text-left">Search meetings, docs, answers…</span>
-        <kbd className="hidden items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--background)] px-1.5 py-0.5 text-[10px] font-medium text-subtle sm:inline-flex">
-          <Command className="h-2.5 w-2.5" />K
-        </kbd>
-      </button>
 
       <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
         <Button
+          type="button"
+          variant="outline"
           size="sm"
-          variant="primary"
-          className="inline-flex"
-          onClick={handleStartMeeting}
+          className="hidden sm:inline-flex"
+          onClick={() => {
+            setCommandOpen(true);
+            setCommandQuery("");
+          }}
         >
-          <Plus className="h-3.5 w-3.5" />
-          Start Meeting
+          <Command className="h-3.5 w-3.5" />
+          <span className="text-xs text-muted">Ctrl K</span>
         </Button>
-
+        {desktopReady && (
+          <Button type="button" variant="outline" size="sm" onClick={() => void handleCompanion()}>
+            Companion
+          </Button>
+        )}
+        <Button type="button" variant="gradient" size="sm" onClick={handleStartMeeting}>
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Live</span>
+        </Button>
         <button
-          onClick={toggleTheme}
-          className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
+          type="button"
           aria-label="Toggle theme"
-          suppressHydrationWarning
+          onClick={toggleTheme}
+          className="rounded-lg p-2 text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
         >
-          <span suppressHydrationWarning>
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </span>
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
-
         <div className="relative">
           <button
+            type="button"
+            aria-label="Notifications"
             onClick={() => {
               setNotifOpen((o) => !o);
               setProfileOpen(false);
               setWorkspaceOpen(false);
             }}
-            className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
-            aria-label="Notifications"
+            className="relative rounded-lg p-2 text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
           >
             <Bell className="h-4 w-4" />
             {unread > 0 && (
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-teal-400" />
             )}
           </button>
           {notifOpen && (
-            <div className="absolute right-0 top-11 w-80 rounded-2xl border border-[var(--border)] bg-[var(--surface-solid)] p-2 shadow-[var(--shadow-lg)]">
-              <div className="flex items-center justify-between px-2 py-1.5">
-                <p className="text-xs font-semibold uppercase tracking-wider text-subtle">
-                  Notifications
-                </p>
-                {notifs.length > 0 && (
-                  <button
-                    type="button"
-                    className="text-[11px] text-[var(--accent)] hover:underline"
-                    onClick={() => {
-                      setReadIds(notifs.map((n) => n.id));
-                      setNotifs([]);
-                    }}
-                  >
-                    Clear all
-                  </button>
-                )}
-              </div>
+            <div className="absolute right-0 z-50 mt-2 w-72 rounded-2xl border border-[var(--border)] bg-[var(--background-elevated)] p-2 shadow-xl">
               {notifs.length === 0 ? (
-                <p className="px-3 py-4 text-center text-sm text-muted">
-                  No notifications yet.
-                </p>
+                <p className="px-3 py-4 text-sm text-muted">No notifications</p>
               ) : (
                 notifs.map((n) => (
                   <button
                     key={n.id}
                     type="button"
-                    className={cn(
-                      "flex w-full rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-[var(--surface-hover)] hover:text-foreground",
-                      readIds.includes(n.id) ? "text-subtle" : "text-muted"
-                    )}
+                    className="flex w-full items-start gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-[var(--surface-hover)]"
                     onClick={() => {
                       setReadIds((ids) => (ids.includes(n.id) ? ids : [...ids, n.id]));
-                      setNotifOpen(false);
                       router.push(n.href);
+                      setNotifOpen(false);
                     }}
                   >
-                    {n.text}
+                    {!readIds.includes(n.id) ? (
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-400" />
+                    ) : (
+                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" />
+                    )}
+                    <span>{n.text}</span>
                   </button>
                 ))
               )}
             </div>
           )}
         </div>
-
         <div className="relative">
           <button
             type="button"
@@ -287,87 +232,63 @@ export function Topbar() {
               setNotifOpen(false);
               setWorkspaceOpen(false);
             }}
-            className={cn(
-              "flex items-center gap-2 rounded-xl py-1 pl-1 pr-2 transition hover:bg-[var(--surface-hover)]"
-            )}
+            className="flex items-center gap-2 rounded-xl p-1 transition hover:bg-[var(--surface-hover)]"
           >
-            <Avatar name={displayName} size="sm" />
-            <span className="hidden max-w-[120px] truncate text-sm font-medium lg:inline">
-              {displayName}
-            </span>
+            <Avatar name={displayName || initial || "User"} size="sm" />
           </button>
           {profileOpen && (
-            <div className="absolute right-0 top-11 w-56 rounded-2xl border border-[var(--border)] bg-[var(--surface-solid)] p-2 shadow-[var(--shadow-lg)]">
-              {session ? (
-                <>
-                  <div className="border-b border-[var(--border)] px-3 py-2">
-                    <p className="truncate text-sm font-medium">{session.name}</p>
-                    <p className="truncate text-xs text-subtle">{session.email}</p>
-                  </div>
-                  <Link
-                    href="/settings"
-                    className="mt-1 block rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    Settings
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-red-400 transition hover:bg-red-500/10"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    Log out
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Link
-                    href="/signup"
-                    className="block rounded-xl px-3 py-2 text-sm font-medium text-[var(--accent)] transition hover:bg-[var(--surface-hover)]"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    Create account
-                  </Link>
-                  <Link
-                    href="/login"
-                    className="block rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-[var(--surface-hover)] hover:text-foreground"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    Sign in
-                  </Link>
-                </>
+            <div className="absolute right-0 z-50 mt-2 w-56 rounded-2xl border border-[var(--border)] bg-[var(--background-elevated)] p-2 shadow-xl">
+              <div className="border-b border-[var(--border)] px-3 py-2">
+                <p className="truncate text-sm font-medium">{displayName}</p>
+                <p className="truncate text-xs text-muted">{session?.email}</p>
+              </div>
+              <Link
+                href="/settings"
+                className="mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm hover:bg-[var(--surface-hover)]"
+                onClick={() => setProfileOpen(false)}
+              >
+                <Settings className="h-4 w-4" />
+                Settings
+              </Link>
+              {admin && (
+                <Link
+                  href="/admin"
+                  className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm hover:bg-[var(--surface-hover)]"
+                  onClick={() => setProfileOpen(false)}
+                >
+                  <Shield className="h-4 w-4" />
+                  Admin Portal
+                </Link>
               )}
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-red-400 hover:bg-red-500/10"
+                onClick={() => void handleLogout()}
+              >
+                <LogOut className="h-4 w-4" />
+                Log out
+              </button>
             </div>
           )}
         </div>
       </div>
 
       {commandOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[15vh]"
-          onClick={() => setCommandOpen(false)}
-        >
-          <div
-            className="w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-solid)] shadow-[var(--shadow-lg)]"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/50 px-4 pt-[15vh]">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--background-elevated)] shadow-2xl">
             <div className="flex items-center gap-2 border-b border-[var(--border)] px-3">
-              <Search className="h-4 w-4 text-subtle" />
+              <Search className="h-4 w-4 text-muted" />
               <input
                 ref={commandInputRef}
                 value={commandQuery}
                 onChange={(e) => setCommandQuery(e.target.value)}
                 placeholder="Jump to…"
-                className="h-12 flex-1 bg-transparent text-sm outline-none"
+                className="h-12 w-full bg-transparent text-sm outline-none"
               />
-              <kbd className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-subtle">
-                Esc
-              </kbd>
             </div>
             <div className="max-h-72 overflow-y-auto p-2">
               {filteredCommands.length === 0 ? (
-                <p className="px-3 py-6 text-center text-sm text-muted">No matches</p>
+                <p className="px-3 py-4 text-sm text-muted">No matches</p>
               ) : (
                 filteredCommands.map((item) => {
                   const Icon = item.icon;
@@ -375,31 +296,26 @@ export function Topbar() {
                     <button
                       key={item.href}
                       type="button"
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-[var(--surface-hover)]"
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-[var(--surface-hover)]"
                       onClick={() => {
                         setCommandOpen(false);
                         router.push(item.href);
                       }}
                     >
-                      <Icon className="h-4 w-4 text-subtle" />
+                      <Icon className="h-4 w-4 text-muted" />
                       {item.label}
                     </button>
                   );
                 })
               )}
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-[var(--surface-hover)]"
-                onClick={() => {
-                  setCommandOpen(false);
-                  void handleCompanion();
-                }}
-              >
-                <Command className="h-4 w-4 text-subtle" />
-                {desktopReady ? "Toggle Desktop companion" : "Open companion (Desktop if available)"}
-              </button>
             </div>
           </div>
+          <button
+            type="button"
+            aria-label="Close command palette"
+            className="absolute inset-0 -z-10"
+            onClick={() => setCommandOpen(false)}
+          />
         </div>
       )}
     </header>
